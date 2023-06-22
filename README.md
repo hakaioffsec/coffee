@@ -2,7 +2,7 @@
 
 Coffee is a custom implementation of the original Cobalt Strike's [beacon_inline_execute](https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/topics_aggressor-scripts/as-resources_functions.htm#beacon_inline_execute). It is written in Rust and supports most of the features of the Cobalt Strike compatibility layer. Coffee is structured so it can be used as a library in other projects too.
 
-The original blog post can be found here: <https://labs.hakaioffsec.com/>
+The original blog post can be found here: <https://labs.hakaioffsec.com/coffee-a-coff-loader-made-in-rust/>
 
 ## Usage
 
