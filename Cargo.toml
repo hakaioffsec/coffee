@@ -1,9 +1,11 @@
 [package]
-name = "coffee"
+name = "coffee-ldr"
 version = "0.1.0"
 authors = ["biscoito <biscoito@riseup.net>"]
 description = "Coffee: A COFF loader made in Rust"
 license = "GPL-3.0-or-later"
+homepage = "https://github.com/hakaioffsec/coffee"
+repository = "https://github.com/hakaioffsec/coffee"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
