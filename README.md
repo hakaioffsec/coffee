@@ -40,6 +40,31 @@ Using the `dir.x64.o` BOF from the [trustedsec/CS-Situational-Awareness-BOF](htt
 coffee.exe --bof-path .\dir.x64.o -- wstr:"C:\\Windows\\System32"
 ```
 
+## Usage as library
+
+```bash
+cargo add coffee-ldr
+```
+
+Coffee can be used as a library in other projects. The following example shows how to use Coffee to load a BOF and execute the BOF:
+
+```rust
+use coffee_ldr::loader::Coffee;
+
+fn main() {
+    let whoami_bof: [u8; 6771] = [
+        0x64, 0x86, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x14, 0x00, 0x00, 0x33, 0x00, 0x00,
+        ...
+    ];
+
+    let _ = Coffee::new(&whoami_bof).unwrap().execute(None, None, None);
+}
+```
+
+The example above will execute the BOF passed as an array of bytes and show the output in console.
+
+The detailed documentation can be found at: <https://docs.rs/coffee-ldr/latest/coffee_ldr/loader/struct.Coffee.html>
+
 ## Building from source
 
 1. Install Rust from <https://rustup.rs/>

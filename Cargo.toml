@@ -19,7 +19,7 @@ opt-level = "z"
 lto = true
 
 [dependencies]
-clap = { version = "4.3.4", features = ["derive"] }     # For command line parsing.
+clap = { version = "4.3.5", features = ["derive"] }     # For command line parsing.
 tracing-subscriber = "0.3.17"                           # For logging.
 color-eyre = "0.6.2"                                    # For error handling.
 goblin = { version = "0.7.1", features = ["alloc"] }    # For parsing COFF files. object can be used too.
