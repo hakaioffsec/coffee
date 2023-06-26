@@ -186,7 +186,10 @@ impl<'a> Coffee<'a> {
 
         let polished_import_name = raw_symbol_name
             .split(self.get_imp_based_on_architecture()?) // Some Object files will have __imp_ while on 32-bit for some reason!
-            .last();
+            .last()
+            .unwrap()
+            .split("@")
+            .next();
 
         if polished_import_name.is_none() {
             panic!("Failed to get polished import name");
