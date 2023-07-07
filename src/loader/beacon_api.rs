@@ -544,8 +544,8 @@ extern "C" fn beacon_output(_type: c_int, data: *mut c_char, len: c_int) {
 
 /// Retrieves the output data from the beacon.
 #[no_mangle]
-pub fn beacon_get_output_data() -> Carrier {
-    return unsafe { OUTPUT.clone() };
+pub fn beacon_get_output_data() -> &'static mut Carrier {
+    return unsafe { &mut OUTPUT };
 }
 
 /// Format and present output to the Beacon operator.
