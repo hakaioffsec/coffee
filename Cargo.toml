@@ -1,6 +1,6 @@
 [package]
 name = "coffee-ldr"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["biscoito <biscoito@riseup.net>"]
 description = "Coffee: A COFF loader made in Rust"
 documentation = "https://docs.rs/coffee-ldr/latest"
