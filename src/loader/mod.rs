@@ -36,7 +36,7 @@ struct MappedFunction {
 }
 
 struct MappedFunctions {
-    list: [MappedFunction; 128], // Defines the limit of mapped functions, in this case a hard-coded 128.
+    list: [MappedFunction; 512], // Defines the limit of mapped functions, in this case a hard-coded 512.
     len: usize,
 }
 
@@ -115,7 +115,7 @@ impl<'a> Coffee<'a> {
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
         entrypoint_name: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         // Check if COFF is running on the current architecture
         if self.is_x86()? && cfg!(target_arch = "x86_64") {
             panic!("Cannot run x86 COFF on x86_64 architecture");
@@ -132,10 +132,12 @@ impl<'a> Coffee<'a> {
         // Get the output and print it
         let output_data = beacon_get_output_data();
 
-        // Print output data
-        if output_data.len() > 0 {
-            println!("{}", output_data.flush());
-        }
+        // Clone output data before resetting
+        let out_data: String = if output_data.len() > 0 {
+            output_data.flush()
+        } else {
+            String::new()
+        };
 
         // Reset the output data
         output_data.reset();
@@ -143,7 +145,7 @@ impl<'a> Coffee<'a> {
         // Free the memory of all sections
         self.free_bof_memory()?;
 
-        Ok(())
+        Ok(out_data)
     }
 
     /// This is a bit too repetitive
