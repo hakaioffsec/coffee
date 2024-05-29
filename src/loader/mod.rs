@@ -182,6 +182,15 @@ impl<'a> Coffee<'a> {
     /// in the specified library after allocating using the mapping list.
     /// apisets can be shown in the symbol name.
     fn get_import_from_symbol(&self, symbol: Symbol) -> Result<usize> {
+        // Get the global mapping list
+        if unsafe { FUNCTION_MAPPING.is_none() } {
+            unsafe {
+                FUNCTION_MAPPING = Some(&mut *MappedFunctions::new());
+            }
+        }
+        let mapping_list = unsafe { FUNCTION_MAPPING.as_mut().unwrap() };
+
+        // Resolve the symbol name
         let raw_symbol_name = symbol.name(&self.coff.strings)?;
         debug!("Raw symbol name: {}", raw_symbol_name);
 
@@ -198,6 +207,15 @@ impl<'a> Coffee<'a> {
         );
 
         let mut symbol_address = 0;
+
+        // Check if `polished_symbol_name` is already in mapping_list as the 'name' property
+        // If it is, we already resolved it, so we can return early
+        for i in 0..mapping_list.len {
+            if mapping_list.list[i].name == polished_import_name.unwrap() {
+                debug!("Symbol already mapped: {}", polished_import_name.unwrap());
+                return Ok(mapping_list.list[i].address);
+            }
+        }
 
         // Check if the symbol is external or internal
         if polished_import_name.unwrap().contains('$') {
@@ -255,24 +273,15 @@ impl<'a> Coffee<'a> {
             }
         }
 
+        // Push the mapped function to the global list
         let mapped_func_entry = MappedFunction {
             address: symbol_address,
             name: polished_import_name.unwrap().to_string(),
         };
-
-        if unsafe { FUNCTION_MAPPING.is_none() } {
-            unsafe {
-                FUNCTION_MAPPING = Some(&mut *MappedFunctions::new());
-            }
-        }
-
-        // Push the mapped function to the list
-        let mapping_list = unsafe { FUNCTION_MAPPING.as_mut().unwrap() };
         mapping_list.push(mapped_func_entry);
 
         // Return the address of the mapped function
-        let allocated_address = &mapping_list.list.as_ref()[mapping_list.len - 1];
-        Ok(std::ptr::from_ref(&allocated_address.address) as usize)
+        Ok(symbol_address)
     }
 
     /// Allocates all the memory needed for each relocation and section.
@@ -685,7 +694,9 @@ impl<'a> Coffee<'a> {
         argument_size: Option<usize>,
         entrypoint_name: &Option<String>,
     ) {
-        // Check if BeaconDataParse, BeaconDataPtr, BeaconDataInt, BeaconDataShort, BeaconDataLength or BeaconDataExtract is present on the mapped functions
+        // Check if BeaconDataParse, BeaconDataPtr, BeaconDataInt,
+        // BeaconDataShort, BeaconDataLength or BeaconDataExtract
+        // are present on the mapped functions
         let data_functions = [
             "BeaconDataParse",
             "BeaconDataPtr",
