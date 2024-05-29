@@ -1,6 +1,8 @@
+#![allow(internal_features)]
 #![feature(c_variadic)]
 #![feature(core_intrinsics)]
 
+use std::fmt::Write;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -32,14 +34,12 @@ struct Args {
 
     /// Arguments to the BOF passed after the "--" delimiter, supported types are: str, wstr, int, short
     #[clap(last = true)]
-    args: Vec<String>,
+    arguments: Vec<String>,
 }
 
 /// Unhexilify a string of hexadecimal characters to pass as arguments to the BOF
 fn unhexilify_args(value: &str) -> Result<Vec<u8>> {
-    if value.len() % 2 != 0 {
-        panic!("Invalid argument hexadecimal string");
-    }
+    assert!(value.len() % 2 == 0, "Invalid argument hexadecimal string");
 
     let bytes: Result<Vec<u8>, _> = (0..value.len())
         .step_by(2)
@@ -50,14 +50,15 @@ fn unhexilify_args(value: &str) -> Result<Vec<u8>> {
 }
 
 /// Hexilifies a list of arguments passed after the delimiter with the type and value
-fn hexlify_args(args: Vec<String>) -> Result<String> {
+fn hexlify_args(args: Vec<String>) -> String {
     let mut beacon_pack = BeaconPack::new();
 
     for arg in args {
         let tokens: Vec<&str> = arg.splitn(2, ':').collect();
-        if tokens.len() != 2 {
-            panic!("Invalid argument format! Expected: <type>:<value>, Example: str:HelloWorld or int:123");
-        }
+        assert!(
+            tokens.len() == 2,
+            "Invalid argument format! Expected: <type>:<value>, Example: str:HelloWorld or int:123"
+        );
 
         let argument_type = tokens[0].trim();
         let argument_value = tokens[1].trim();
@@ -83,13 +84,12 @@ fn hexlify_args(args: Vec<String>) -> Result<String> {
         }
     }
 
-    let hex_buffer = beacon_pack
-        .get_buffer()
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect();
+    let mut hex_buffer = String::new();
+    for b in beacon_pack.get_buffer() {
+        write!(&mut hex_buffer, "{b:02X}").expect("Unable to write");
+    }
 
-    Ok(hex_buffer)
+    hex_buffer
 }
 
 /// Main function
@@ -114,16 +114,16 @@ fn main() -> Result<()> {
 
     // Get arguments after the delimiter --
     let after_delimiter_args: Vec<String> = args
-        .args
+        .arguments
         .split(|arg| arg == "--")
         .flat_map(|args| args.iter())
-        .map(|arg| arg.clone())
+        .map(std::clone::Clone::clone)
         .collect();
 
     debug!("Arguments: {:?}", after_delimiter_args);
 
     // Hexlify the arguments
-    let arguments = hexlify_args(after_delimiter_args)?;
+    let arguments = hexlify_args(after_delimiter_args);
     debug!("Hexilified arguments: {}", arguments);
 
     // Load the buffer from the BOF path
@@ -139,10 +139,10 @@ fn main() -> Result<()> {
     let output = Coffee::new(coff_buffer.as_slice())?.execute(
         Some(unhexilified.as_ptr()),
         Some(unhexilified.len()),
-        args.entrypoint,
+        &args.entrypoint,
     )?;
 
-    println!("Execution output: {}", output);
+    println!("Execution output: {output}");
 
     Ok(())
 }

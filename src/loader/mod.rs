@@ -40,11 +40,11 @@ struct MappedFunctions {
     len: usize,
 }
 
-/// MappedFunctions is a struct that contains a list of mapped functions and the length of the list.
+/// `MappedFunctions` is a struct that contains a list of mapped functions and the length of the list.
 impl MappedFunctions {
-    /// new returns a new MappedFunctions struct.
+    /// new returns a new `MappedFunctions` struct.
     fn new() -> *mut Self {
-        let function = unsafe {
+        std::ptr::from_mut(unsafe {
             let allocation = VirtualAlloc(
                 None,
                 core::mem::size_of::<MappedFunctions>(),
@@ -54,15 +54,11 @@ impl MappedFunctions {
 
             debug!("Function allocated at: {:p}", allocation);
 
-            if allocation.is_null() {
-                panic!("Failed to allocate function");
-            }
+            assert!(!allocation.is_null(), "Failed to allocate function");
 
             std::ptr::write_bytes(allocation, 0, core::mem::size_of::<MappedFunctions>());
-            &mut *(allocation as *mut MappedFunctions)
-        };
-
-        function
+            &mut *allocation.cast::<MappedFunctions>()
+        })
     }
 
     /// push pushes a mapped function to the list.
@@ -73,16 +69,16 @@ impl MappedFunctions {
 }
 
 impl Drop for MappedFunctions {
-    /// drop frees the memory allocated for the MappedFunctions struct.
+    /// drop frees the memory allocated for the `MappedFunctions` struct.
     fn drop(&mut self) {
         unsafe {
-            let functions = self as *mut _ as *mut c_void;
+            let functions = std::ptr::from_mut(self).cast::<c_void>();
             VirtualFree(functions, 0, MEM_RELEASE);
         }
     }
 }
 
-/// CoffLoader is a struct that contains a slice of bytes representing a COFF file and a parsed COFF file.
+/// `CoffLoader` is a struct that contains a slice of bytes representing a COFF file and a parsed COFF file.
 pub struct Coffee<'a> {
     coff_buffer: &'a [u8],
     coff: Coff<'a>,
@@ -98,7 +94,7 @@ static mut TEXT_SECTION_INDEX: i32 = 0;
 static mut SECTION_MAPPING: Vec<usize> = Vec::new();
 
 impl<'a> Coffee<'a> {
-    /// Creates a new CoffLoader struct from a slice of bytes representing a COFF file.
+    /// Creates a new `CoffLoader` struct from a slice of bytes representing a COFF file.
     pub fn new(coff_buffer: &'a [u8]) -> Result<Self> {
         let coff = Coff::parse(coff_buffer)?;
 
@@ -110,11 +106,14 @@ impl<'a> Coffee<'a> {
     /// The entrypoint name is optional and is used to specify a custom entrypoint name.
     /// The default entrypoint name is go.
     /// The output of the bof is printed to stdout.
+    ///
+    /// # Panics
+    /// Panics if the COFF is being run on the wrong architecture.
     pub fn execute(
         &self,
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
-        entrypoint_name: Option<String>,
+        entrypoint_name: &Option<String>,
     ) -> Result<String> {
         // Check if COFF is running on the current architecture
         if self.is_x86()? && cfg!(target_arch = "x86_64") {
@@ -127,7 +126,7 @@ impl<'a> Coffee<'a> {
         self.allocate_bof_memory()?;
 
         // Execute the bof
-        self.execute_bof(arguments, argument_size, entrypoint_name)?;
+        self.execute_bof(arguments, argument_size, entrypoint_name);
 
         // Get the output and print it
         let output_data = beacon_get_output_data();
@@ -143,7 +142,7 @@ impl<'a> Coffee<'a> {
         output_data.reset();
 
         // Free the memory of all sections
-        self.free_bof_memory()?;
+        self.free_bof_memory();
 
         Ok(out_data)
     }
@@ -178,7 +177,7 @@ impl<'a> Coffee<'a> {
 
     /// Gets the external or local function address from the symbol name and returns the result.
     /// When the symbol name is an internal function, it will return the address of the function
-    /// in the beacon_api module.
+    /// in the `beacon_api` module.
     /// When the symbol name is an external function, it will return the procedure address of the function
     /// in the specified library after allocating using the mapping list.
     /// apisets can be shown in the symbol name.
@@ -190,27 +189,28 @@ impl<'a> Coffee<'a> {
             .split(self.get_imp_based_on_architecture()?) // Some Object files will have __imp_ while on 32-bit for some reason!
             .last()
             .unwrap()
-            .split("@")
+            .split('@')
             .next();
 
-        if polished_import_name.is_none() {
-            panic!("Failed to get polished import name");
-        }
+        assert!(
+            polished_import_name.is_some(),
+            "Failed to get polished import name"
+        );
 
         let mut symbol_address = 0;
 
         // Check if the symbol is external or internal
-        if polished_import_name.unwrap().contains("$") {
+        if polished_import_name.unwrap().contains('$') {
             // This is an external symbol
             // Split $ to get the library name and function name
-            let mut split_symbol_name = polished_import_name.unwrap().split("$");
+            let mut split_symbol_name = polished_import_name.unwrap().split('$');
             let library_name_dll =
                 format!("{}.dll", split_symbol_name.next().unwrap().to_lowercase());
 
             // If symbol name contains @, remove everything before the @
             let function_name = split_symbol_name.next();
             if function_name.is_some() {
-                let function_name = function_name.unwrap().split("@").next().unwrap();
+                let function_name = function_name.unwrap().split('@').next().unwrap();
 
                 info!(
                     "Resolving external import: {}!{}",
@@ -220,7 +220,7 @@ impl<'a> Coffee<'a> {
                 // Get the function address
                 let load_library_address = unsafe {
                     LoadLibraryW(PCWSTR(
-                        WideCString::from_str(format!("{}\0", library_name_dll))?.as_ptr(),
+                        WideCString::from_str(format!("{library_name_dll}\0"))?.as_ptr(),
                     ))?
                 };
 
@@ -228,16 +228,15 @@ impl<'a> Coffee<'a> {
                 let procedure_address = unsafe {
                     GetProcAddress(
                         load_library_address,
-                        PCSTR(format!("{}\0", function_name).as_ptr()), // Null terminated string lol :D
+                        PCSTR(format!("{function_name}\0").as_ptr()), // Null terminated string lol :D
                     )
                 };
 
-                if procedure_address.is_none() {
-                    panic!(
-                        "Failed to get procedure address: {}",
-                        polished_import_name.unwrap()
-                    );
-                }
+                assert!(
+                    procedure_address.is_some(),
+                    "Failed to get procedure address: {}",
+                    polished_import_name.unwrap()
+                );
 
                 symbol_address = procedure_address.unwrap() as usize;
             }
@@ -248,8 +247,7 @@ impl<'a> Coffee<'a> {
                     "Resolving internal import: {}",
                     polished_import_name.unwrap()
                 );
-                let internal_func_address =
-                    get_function_ptr(polished_import_name.unwrap()).unwrap();
+                let internal_func_address = get_function_ptr(polished_import_name.unwrap());
 
                 symbol_address = internal_func_address;
             } else {
@@ -274,16 +272,18 @@ impl<'a> Coffee<'a> {
 
         // Return the address of the mapped function
         let allocated_address = &mapping_list.list.as_ref()[mapping_list.len - 1];
-        Ok(&allocated_address.address as *const _ as usize)
+        Ok(std::ptr::from_ref(&allocated_address.address) as usize)
     }
 
     /// Allocates all the memory needed for each relocation and section.
+    #[allow(clippy::cast_possible_wrap)]
     fn allocate_bof_memory(&self) -> Result<()> {
         // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
         // Note that the Windows loader limits the number of sections to 96.
-        if self.coff.header.number_of_sections > 96 {
-            panic!("Number of sections is greater than 96!");
-        }
+        assert!(
+            self.coff.header.number_of_sections <= 96,
+            "Number of sections is greater than 96!"
+        );
 
         // Iterate through coff_header NumberOfSections
         info!(
@@ -311,7 +311,7 @@ impl<'a> Coffee<'a> {
 
             if section.name()?.contains("text") {
                 unsafe {
-                    TEXT_SECTION_INDEX = idx as i32;
+                    TEXT_SECTION_INDEX = i32::from(idx);
                 }
             }
 
@@ -319,7 +319,7 @@ impl<'a> Coffee<'a> {
             unsafe { SECTION_MAPPING.push(section_base as usize) };
 
             // Copy the sections into the allocated memory if it is initialized otherwise set the memory to 0
-            if !(section.pointer_to_raw_data == 0) {
+            if section.pointer_to_raw_data != 0 {
                 info!(
                     "Copying memory for section: {}, base: {:#x}, size: {:#x}",
                     section.name()?,
@@ -329,11 +329,10 @@ impl<'a> Coffee<'a> {
 
                 unsafe {
                     intrinsics::volatile_copy_nonoverlapping_memory(
-                        section_base as *mut u8,
+                        section_base.cast::<u8>(),
                         self.coff_buffer
                             .as_ptr()
-                            .add(section.pointer_to_raw_data as usize)
-                            as *const u8,
+                            .add(section.pointer_to_raw_data as usize),
                         section_size,
                     );
                 }
@@ -346,7 +345,7 @@ impl<'a> Coffee<'a> {
                 );
 
                 unsafe {
-                    intrinsics::volatile_set_memory(section_base as *mut u8, 0, section_size);
+                    intrinsics::volatile_set_memory(section_base.cast::<u8>(), 0, section_size);
                 }
             }
         }
@@ -373,20 +372,26 @@ impl<'a> Coffee<'a> {
                                 symbol.storage_class
                             );
 
-                            if symbol.section_number < 0 {
-                                // Section index
-                                warn!(
-                                    "Unsupported relocation section number: {}",
-                                    symbol.section_number
-                                );
+                            match symbol.section_number.cmp(&0) {
+                                std::cmp::Ordering::Less => {
+                                    // Section index
+                                    warn!(
+                                        "Unsupported relocation section number: {}",
+                                        symbol.section_number
+                                    );
 
-                                continue;
-                            } else if symbol.section_number == 0 {
-                                import_address_ptr = self.get_import_from_symbol(symbol)?;
-                                debug!(
-                                    "Symbol import address ptr: 0x{:X}",
-                                    import_address_ptr as usize
-                                );
+                                    continue;
+                                }
+                                std::cmp::Ordering::Equal => {
+                                    // Import address pointer
+                                    import_address_ptr = self.get_import_from_symbol(symbol)?;
+                                    debug!("Symbol import address ptr: 0x{:X}", {
+                                        import_address_ptr
+                                    });
+                                }
+                                std::cmp::Ordering::Greater => {
+                                    // Do nothing
+                                }
                             }
 
                             // Get the target section base that is the section mapping with the symbol section number - 1
@@ -678,8 +683,8 @@ impl<'a> Coffee<'a> {
         &self,
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
-        entrypoint_name: Option<String>,
-    ) -> Result<()> {
+        entrypoint_name: &Option<String>,
+    ) {
         // Check if BeaconDataParse, BeaconDataPtr, BeaconDataInt, BeaconDataShort, BeaconDataLength or BeaconDataExtract is present on the mapped functions
         let data_functions = [
             "BeaconDataParse",
@@ -696,7 +701,7 @@ impl<'a> Coffee<'a> {
                 .unwrap()
                 .list
                 .iter()
-                .map(|x| x.name.as_str().split("$").last().unwrap_or_default())
+                .map(|x| x.name.as_str().split('$').last().unwrap_or_default())
                 .collect::<Vec<&str>>()
         };
 
@@ -740,20 +745,18 @@ impl<'a> Coffee<'a> {
                     std::mem::transmute::<usize, fn(*const u8, usize)>(entry_point)(
                         arguments.unwrap_or(std::ptr::null()),
                         argument_size.unwrap_or(0),
-                    )
+                    );
                 };
 
                 // Break after executing so we don't run .pdata or any other section with relocations
                 break;
             }
         }
-
-        Ok(())
     }
 
-    /// Iterates through each section and frees the memory allocated for each section using VirtualFree.
+    /// Iterates through each section and frees the memory allocated for each section using `VirtualFree`.
     /// This is done to prevent memory leaks.
-    fn free_bof_memory(&self) -> Result<()> {
+    fn free_bof_memory(&self) {
         // Drop mapped functions
         unsafe {
             FUNCTION_MAPPING = None;
@@ -770,7 +773,5 @@ impl<'a> Coffee<'a> {
                 VirtualFree(section_base as *mut c_void, 0, MEM_RELEASE);
             }
         }
-
-        Ok(())
     }
 }

@@ -7,10 +7,10 @@ pub struct BeaconPack {
     pub size: u32,
 }
 
-/// BeaconPack is a struct that contains a buffer and size
+/// `BeaconPack` is a struct that contains a buffer and size
 /// The buffer is used to store the data that will be sent to the BOF's arguments
 impl BeaconPack {
-    /// new returns a new BeaconPack
+    /// `new` returns a new `BeaconPack`
     pub fn new() -> BeaconPack {
         BeaconPack {
             buffer: vec![],
@@ -18,7 +18,10 @@ impl BeaconPack {
         }
     }
 
-    /// get_buffer returns the buffer with the size prepended
+    /// `get_buffer` returns the buffer with the size prepended
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as an u32
     pub fn get_buffer(&self) -> Vec<u8> {
         let mut result = vec![];
         result.write_u32::<LittleEndian>(self.size).unwrap();
@@ -26,19 +29,28 @@ impl BeaconPack {
         result
     }
 
-    /// add_short adds a short to the buffer
+    /// `add_short` adds a short to the buffer
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as a i16
     pub fn add_short(&mut self, short: i16) {
         self.buffer.write_i16::<LittleEndian>(short).unwrap();
         self.size += 2;
     }
 
-    /// add_int adds an int to the buffer
+    /// `add_int` adds an int to the buffer
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as a i32
     pub fn add_int(&mut self, int: i32) {
         self.buffer.write_i32::<LittleEndian>(int).unwrap();
         self.size += 4;
     }
 
-    /// add_str adds a string to the buffer
+    /// `add_str` adds a string to the buffer
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as a string
     pub fn add_str(&mut self, str: &str) {
         let s_bytes = str.as_bytes();
         self.buffer
@@ -49,7 +61,10 @@ impl BeaconPack {
         self.size += (s_bytes.len() + 1) as u32 + 4;
     }
 
-    /// add_wstr adds a wide string to the buffer
+    /// `add_wstr` adds a wide string to the buffer
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as a wide string
     pub fn add_wstr(&mut self, wstr: &str) {
         let s_bytes = wstr.encode_utf16().collect::<Vec<u16>>();
         self.buffer
@@ -60,5 +75,11 @@ impl BeaconPack {
         }
         self.buffer.write_u16::<LittleEndian>(0).unwrap();
         self.size += ((s_bytes.len() * 2) + 2) as u32 + 4;
+    }
+}
+
+impl Default for BeaconPack {
+    fn default() -> Self {
+        Self::new()
     }
 }
