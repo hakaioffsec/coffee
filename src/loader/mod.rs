@@ -211,12 +211,13 @@ impl<'a> Coffee<'a> {
 
         // Check if `polished_symbol_name` is already in mapping_list as the 'name' property
         // If it is, we already resolved it, so we can return early
-        for i in 0..mapping_list.len {
-            if mapping_list.list[i].name == polished_import_name.unwrap() {
-                debug!("Symbol already mapped: {}", polished_import_name.unwrap());
-                return Ok(mapping_list.list[i].address);
-            }
-        }
+        // TODO
+        // for i in 0..mapping_list.len {
+        //     if mapping_list.list[i].name == polished_import_name.unwrap() {
+        //         debug!("Symbol already mapped: {}", polished_import_name.unwrap());
+        //         return Ok(mapping_list.list[i].address);
+        //     }
+        // }
 
         // Check if the symbol is external or internal
         if polished_import_name.unwrap().contains('$') {
@@ -283,7 +284,8 @@ impl<'a> Coffee<'a> {
         mapping_list.push(mapped_func_entry);
 
         // Return the address of the mapped function
-        Ok(symbol_address)
+        let allocated_address = &mapping_list.list.as_ref()[mapping_list.len - 1];
+        Ok(std::ptr::from_ref(&allocated_address.address) as usize)
     }
 
     /// Allocates all the memory needed for each relocation and section.
