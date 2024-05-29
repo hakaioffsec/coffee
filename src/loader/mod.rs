@@ -33,13 +33,7 @@ pub mod beacon_pack;
 struct MappedFunction {
     address: usize,
     name: String,
-}
-
-impl MappedFunction {
-    /// `get_function_name` returns only a clean version of the name
-    fn get_function_name(&self) -> String {
-        self.name.split('$').last().unwrap_or("").to_string()
-    }
+    function_name: String,
 }
 
 struct MappedFunctions {
@@ -284,6 +278,7 @@ impl<'a> Coffee<'a> {
         let mapped_func_entry = MappedFunction {
             address: symbol_address,
             name: polished_import_name.unwrap().to_string(),
+            function_name: polished_import_name.unwrap().to_string(),
         };
         mapping_list.push(mapped_func_entry);
 
@@ -710,7 +705,7 @@ impl<'a> Coffee<'a> {
                 .list
                 .iter()
                 .filter(|x| !x.name.is_empty())
-                .map(|x| (*x).get_function_name())
+                .map(|x| x.function_name.clone())
                 .collect::<Vec<String>>()
         };
 
@@ -750,23 +745,24 @@ impl<'a> Coffee<'a> {
             let entry_name: String = if entrypoint_name.is_some() {
                 entrypoint_name.as_ref().unwrap().to_string()
             } else {
-                "go".to_string()
+                "Go".to_string()
+                /* _go for 32-bit for whatever reason? */
             };
 
-            /* _go for 32-bit for whatever reason? */
             if name.unwrap().contains(entry_name.as_str()) {
-                let entry_point = unsafe { SECTION_MAPPING[(TEXT_SECTION_INDEX) as usize] }
+                let entry_addr = unsafe { SECTION_MAPPING[(TEXT_SECTION_INDEX) as usize] }
                     .add(symbol.value as usize);
 
-                // Call entrypoint
-                info!("Calling entrypoint: {}:{:#x}", name.unwrap(), entry_point);
+                // Cast the entrypoint to a function
+                info!("Calling entrypoint: {}:{:#x}", name.unwrap(), entry_addr);
+                let entrypoint: extern "C" fn(*const u8, usize) =
+                    unsafe { std::mem::transmute(entry_addr) };
 
-                unsafe {
-                    std::mem::transmute::<usize, fn(*const u8, usize)>(entry_point)(
-                        arguments.unwrap_or(std::ptr::null()),
-                        argument_size.unwrap_or(0),
-                    );
-                };
+                // Call the entrypoint
+                entrypoint(
+                    arguments.unwrap_or(std::ptr::null()),
+                    argument_size.unwrap_or(0),
+                );
 
                 // Break after executing so we don't run .pdata or any other section with relocations
                 break;
