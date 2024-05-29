@@ -35,6 +35,13 @@ struct MappedFunction {
     name: String,
 }
 
+impl MappedFunction {
+    /// `get_function_name` returns only a clean version of the name
+    fn get_function_name(&self) -> String {
+        self.name.split('$').last().unwrap_or("").to_string()
+    }
+}
+
 struct MappedFunctions {
     list: [MappedFunction; 512], // Defines the limit of mapped functions, in this case a hard-coded 512.
     len: usize,
@@ -42,7 +49,7 @@ struct MappedFunctions {
 
 /// `MappedFunctions` is a struct that contains a list of mapped functions and the length of the list.
 impl MappedFunctions {
-    /// new returns a new `MappedFunctions` struct.
+    /// `new` returns a new `MappedFunctions` struct.
     fn new() -> *mut Self {
         std::ptr::from_mut(unsafe {
             let allocation = VirtualAlloc(
@@ -61,7 +68,7 @@ impl MappedFunctions {
         })
     }
 
-    /// push pushes a mapped function to the list.
+    /// `push` pushes a mapped function to the list.
     fn push(&mut self, entry: MappedFunction) {
         self.list[self.len] = entry;
         self.len += 1;
@@ -694,9 +701,19 @@ impl<'a> Coffee<'a> {
         argument_size: Option<usize>,
         entrypoint_name: &Option<String>,
     ) {
-        // Check if BeaconDataParse, BeaconDataPtr, BeaconDataInt,
-        // BeaconDataShort, BeaconDataLength or BeaconDataExtract
-        // are present on the mapped functions
+        // Check if any of the data-processing functions are present on the mapped functions
+        // If so, throw a warning about the arguments
+        let mapped_function_names = unsafe {
+            FUNCTION_MAPPING
+                .as_mut()
+                .unwrap()
+                .list
+                .iter()
+                .filter(|x| !x.name.is_empty())
+                .map(|x| (*x).get_function_name())
+                .collect::<Vec<String>>()
+        };
+
         let data_functions = [
             "BeaconDataParse",
             "BeaconDataPtr",
@@ -706,22 +723,14 @@ impl<'a> Coffee<'a> {
             "BeaconDataExtract",
         ];
 
-        let mapped_functions_name = unsafe {
-            FUNCTION_MAPPING
-                .as_mut()
-                .unwrap()
-                .list
-                .iter()
-                .map(|x| x.name.as_str().split('$').last().unwrap_or_default())
-                .collect::<Vec<&str>>()
-        };
-
-        if mapped_functions_name
+        if mapped_function_names
             .iter()
-            .any(|x| data_functions.contains(x))
+            .any(|x| data_functions.contains(&x.as_str()))
             && argument_size.unwrap_or(0) <= 4
         {
-            warn!("This BOF requires arguments but no arguments were passed! The BOF may crash or may not function properly!");
+            warn!(
+                "This BOF expects arguments, but none were provided. Please check the provided arguments."
+            );
         }
 
         // Iterate each symbol to find the entrypoint
