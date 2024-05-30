@@ -76,6 +76,18 @@ impl BeaconPack {
         self.buffer.write_u16::<LittleEndian>(0).unwrap();
         self.size += ((s_bytes.len() * 2) + 2) as u32 + 4;
     }
+
+    /// `add_bin` adds binary data to the buffer
+    ///
+    /// # Panics
+    /// Panics if the buffer cannot be written as binary data
+    pub fn add_bin(&mut self, bin: &[u8]) {
+        self.buffer
+            .write_u32::<LittleEndian>(bin.len() as u32)
+            .unwrap();
+        self.buffer.write_all(bin).unwrap();
+        self.size += (bin.len() as u32) + 4;
+    }
 }
 
 impl Default for BeaconPack {

@@ -5,6 +5,7 @@
 use std::fmt::Write;
 use std::path::PathBuf;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
 use color_eyre::Result;
 use tracing::{debug, info};
@@ -32,13 +33,13 @@ struct Args {
     #[clap(default_value = "1")]
     verbosity: Option<u8>,
 
-    /// Arguments to the BOF passed after the "--" delimiter, supported types are: str, wstr, int, short
+    /// Arguments to the BOF passed after the "--" delimiter, supported types are: str, wstr, int, short, bin
     #[clap(last = true)]
     arguments: Vec<String>,
 }
 
-/// Unhexilify a string of hexadecimal characters to pass as arguments to the BOF
-fn unhexilify_args(value: &str) -> Result<Vec<u8>> {
+/// Unhexlify a string of hexadecimal characters to pass as arguments to the BOF
+fn unhexlify_args(value: &str) -> Result<Vec<u8>> {
     assert!(value.len() % 2 == 0, "Invalid argument hexadecimal string");
 
     let bytes: Result<Vec<u8>, _> = (0..value.len())
@@ -79,6 +80,12 @@ fn hexlify_args(args: Vec<String>) -> String {
                 } else {
                     panic!("Invalid short value");
                 }
+            }
+            "bin" => {
+                let bin_value = BASE64_STANDARD
+                    .decode(argument_value)
+                    .expect("Invalid binary value, please provide as base64");
+                beacon_pack.add_bin(&bin_value);
             }
             _ => panic!("Invalid argument type"),
         }
@@ -130,7 +137,7 @@ fn main() -> Result<()> {
     let coff_buffer = std::fs::read(&args.bof_path)?;
 
     // Unhexlify the arguments
-    let unhexilified = unhexilify_args(arguments.as_str())?;
+    let unhexilified = unhexlify_args(arguments.as_str())?;
     debug!("Unhexilified arguments: {:?}", unhexilified);
 
     // Execute the BOF
