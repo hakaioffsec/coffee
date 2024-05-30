@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
-use color_eyre::Result;
+use color_eyre::{Report, Result};
 use tracing::{debug, info};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -51,15 +51,15 @@ fn unhexlify_args(value: &str) -> Result<Vec<u8>> {
 }
 
 /// Hexilifies a list of arguments passed after the delimiter with the type and value
-fn hexlify_args(args: Vec<String>) -> String {
+fn hexlify_args(args: Vec<String>) -> Result<String> {
     let mut beacon_pack = BeaconPack::new();
 
     for arg in args {
         let tokens: Vec<&str> = arg.splitn(2, ':').collect();
-        assert!(
-            tokens.len() == 2,
-            "Invalid argument format! Expected: <type>:<value>, Example: str:HelloWorld or int:123"
-        );
+
+        if tokens.len() != 2 {
+            return Err(Report::msg("Invalid argument format! Expected: <type>:<value>, Example: str:HelloWorld or int:123"));
+        }
 
         let argument_type = tokens[0].trim();
         let argument_value = tokens[1].trim();
@@ -71,23 +71,24 @@ fn hexlify_args(args: Vec<String>) -> String {
                 if let Ok(int_value) = argument_value.parse::<i32>() {
                     beacon_pack.add_int(int_value);
                 } else {
-                    panic!("Invalid integer value");
+                    return Err(Report::msg("Invalid integer value"));
                 }
             }
             "short" => {
                 if let Ok(short_value) = argument_value.parse::<i16>() {
                     beacon_pack.add_short(short_value);
                 } else {
-                    panic!("Invalid short value");
+                    return Err(Report::msg("Invalid short value"));
                 }
             }
             "bin" => {
                 let bin_value = BASE64_STANDARD
                     .decode(argument_value)
-                    .expect("Invalid binary value, please provide as base64");
+                    .map_err(|_| Report::msg("Invalid binary value, please provide as base64"))?;
+
                 beacon_pack.add_bin(&bin_value);
             }
-            _ => panic!("Invalid argument type"),
+            _ => return Err(Report::msg("Invalid argument type")),
         }
     }
 
@@ -96,7 +97,7 @@ fn hexlify_args(args: Vec<String>) -> String {
         write!(&mut hex_buffer, "{b:02X}").expect("Unable to write");
     }
 
-    hex_buffer
+    Ok(hex_buffer)
 }
 
 /// Main function
@@ -130,8 +131,8 @@ fn main() -> Result<()> {
     debug!("Arguments: {:?}", after_delimiter_args);
 
     // Hexlify the arguments
-    let arguments = hexlify_args(after_delimiter_args);
-    debug!("Hexilified arguments: {}", arguments);
+    let arguments = hexlify_args(after_delimiter_args)?;
+    debug!("Hexlified arguments: {}", arguments);
 
     // Load the buffer from the BOF path
     let coff_buffer = std::fs::read(&args.bof_path)?;
