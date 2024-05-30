@@ -21,8 +21,9 @@ use windows::Win32::{
     },
 };
 
-use windows_sys::Win32::System::LibraryLoader::{
-    FreeLibrary, GetModuleHandleA, GetProcAddress, LoadLibraryA,
+use windows_sys::Win32::{
+    Foundation::FreeLibrary,
+    System::LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA},
 };
 
 #[repr(C)]
@@ -581,14 +582,18 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...
 /// Returns TRUE if the token was successfully applied, FALSE otherwise.
 #[no_mangle]
 extern "C" fn beacon_use_token(token: HANDLE) -> BOOL {
-    unsafe { SetThreadToken(Some(std::ptr::null()), token) }
+    match unsafe { SetThreadToken(Some(std::ptr::null()), token) } {
+        Ok(()) => TRUE,
+        Err(_) => FALSE,
+    }
 }
 
 /// Drop the current thread token. Use this over direct calls to `RevertToSelf`.
 /// This function cleans up other state information about the token.
 #[no_mangle]
 extern "C" fn beacon_revert_token() {
-    if !unsafe { RevertToSelf() }.as_bool() {
+    if let Ok(()) = unsafe { RevertToSelf() } {
+    } else {
         warn!("RevertToSelf Failed!");
     }
 }
@@ -602,24 +607,23 @@ extern "C" fn beacon_is_admin() -> BOOL {
     let mut token: HANDLE = HANDLE(0);
     let token_elevated: TOKEN_ELEVATION = TOKEN_ELEVATION { TokenIsElevated: 0 };
 
-    unsafe {
-        if !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).as_bool() {
-            return FALSE;
-        }
+    let open_token_result =
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if open_token_result.is_err() {
+        return FALSE;
     }
 
-    unsafe {
-        if !GetTokenInformation(
+    let get_token_info_result = unsafe {
+        GetTokenInformation(
             token,
             TokenElevation,
             Some(std::ptr::from_ref(&token_elevated) as *mut _),
             std::mem::size_of::<TOKEN_ELEVATION>() as u32,
             std::ptr::null_mut(),
         )
-        .as_bool()
-        {
-            return FALSE;
-        }
+    };
+    if get_token_info_result.is_err() {
+        return FALSE;
     }
 
     if token_elevated.TokenIsElevated == 1 {
@@ -667,20 +671,20 @@ extern "C" fn beacon_inject_process(
         );
 
         if remote_payload_address.is_null() {
-            CloseHandle(process_handle);
+            let _ = CloseHandle(process_handle);
             return;
         }
 
-        if !WriteProcessMemory(
+        if WriteProcessMemory(
             process_handle,
             remote_payload_address,
             payload_slice.as_ptr().cast(),
             payload_slice.len(),
             None,
         )
-        .as_bool()
+        .is_err()
         {
-            CloseHandle(process_handle);
+            let _ = CloseHandle(process_handle);
             return;
         }
 
@@ -698,8 +702,8 @@ extern "C" fn beacon_inject_process(
         )
         .unwrap();
 
-        CloseHandle(process_handle);
-        CloseHandle(thread);
+        let _ = CloseHandle(process_handle);
+        let _ = CloseHandle(thread);
     }
 }
 
@@ -737,8 +741,8 @@ extern "C" fn beacon_spawn_temporary_process(
 #[no_mangle]
 extern "C" fn beacon_cleanup_process(pinfo: *const PROCESS_INFORMATION) {
     unsafe {
-        CloseHandle((*pinfo).hProcess);
-        CloseHandle((*pinfo).hThread);
+        let _ = CloseHandle((*pinfo).hProcess);
+        let _ = CloseHandle((*pinfo).hThread);
     }
 }
 

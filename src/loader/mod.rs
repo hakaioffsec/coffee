@@ -74,7 +74,7 @@ impl Drop for MappedFunctions {
     fn drop(&mut self) {
         unsafe {
             let functions = std::ptr::from_mut(self).cast::<c_void>();
-            VirtualFree(functions, 0, MEM_RELEASE);
+            let _ = VirtualFree(functions, 0, MEM_RELEASE);
         }
     }
 }
@@ -192,7 +192,12 @@ impl<'a> Coffee<'a> {
         let mapping_list = unsafe { FUNCTION_MAPPING.as_mut().unwrap() };
 
         // Resolve the symbol name
-        let raw_symbol_name = symbol.name(&self.coff.strings)?;
+        let raw_symbol_name = match &self.coff.strings {
+            Some(strings) => symbol.name(strings),
+            None => Err(goblin::error::Error::Malformed(
+                "No string table available".to_string(),
+            )),
+        }?;
         debug!("Raw symbol name: {}", raw_symbol_name);
 
         let polished_import_name = raw_symbol_name
@@ -375,318 +380,340 @@ impl<'a> Coffee<'a> {
                 // Iterate through the number of relocation entries
                 for relocation in section.relocations(self.coff_buffer)? {
                     let mut import_address_ptr = 0;
-                    match self
-                        .coff
-                        .symbols
-                        .get(relocation.symbol_table_index as usize)
-                    {
-                        Some((name, symbol)) => {
-                            debug!(
-                                "Symbol: {} section: {} value: {} storage class: {:#?}",
-                                name.unwrap_or_default(),
-                                symbol.section_number,
-                                symbol.value,
-                                symbol.storage_class
-                            );
 
-                            match symbol.section_number.cmp(&0) {
-                                std::cmp::Ordering::Less => {
-                                    // Section index
-                                    warn!(
-                                        "Unsupported relocation section number: {}",
-                                        symbol.section_number
+                    match &self.coff.symbols {
+                        Some(symbols) => {
+                            match symbols.get(relocation.symbol_table_index as usize) {
+                                Some((name, symbol)) => {
+                                    debug!(
+                                        "Symbol: {} section: {} value: {} storage class: {:#?}",
+                                        name.unwrap_or_default(),
+                                        symbol.section_number,
+                                        symbol.value,
+                                        symbol.storage_class
                                     );
 
-                                    continue;
-                                }
-                                std::cmp::Ordering::Equal => {
-                                    // Import address pointer
-                                    import_address_ptr = self.get_import_from_symbol(symbol)?;
-                                    debug!("Symbol import address ptr: 0x{:X}", {
-                                        import_address_ptr
-                                    });
-                                }
-                                std::cmp::Ordering::Greater => {
-                                    // Do nothing
-                                }
-                            }
+                                    match symbol.section_number.cmp(&0) {
+                                        std::cmp::Ordering::Less => {
+                                            // Section index
+                                            warn!(
+                                                "Unsupported relocation section number: {}",
+                                                symbol.section_number
+                                            );
 
-                            // Get the target section base that is the section mapping with the symbol section number - 1
-                            let target_section_base = {
-                                if import_address_ptr == 0 {
-                                    unsafe { SECTION_MAPPING[(symbol.section_number as usize) - 1] }
-                                } else {
-                                    0
-                                }
-                            };
-
-                            debug!("Relocation type: {:#?}", relocation.typ);
-
-                            // Calculate the relocation overwrite address
-                            let relocation_overwrite_address = (unsafe { SECTION_MAPPING[index] })
-                                + (relocation.virtual_address as usize)
-                                - section.virtual_address as usize;
-
-                            // Handle the relocations based on the architecture
-                            if self.is_x64()? {
-                                match relocation.typ {
-                                    // The 64-bit VA of the relocation target.
-                                    IMAGE_REL_AMD64_ADDR64 => {
-                                        // The absolute address is the target section base + the relocation overwrite address + the symbol value
-                                        let absolute_address = {
-                                            if import_address_ptr == 0 {
-                                                target_section_base
-                                                    + unsafe {
-                                                        core::ptr::read_unaligned(
-                                                            relocation_overwrite_address
-                                                                as *const u32,
-                                                        )
-                                                            as usize
-                                                    }
-                                                    + symbol.value as usize
-                                            } else {
+                                            continue;
+                                        }
+                                        std::cmp::Ordering::Equal => {
+                                            // Import address pointer
+                                            import_address_ptr =
+                                                self.get_import_from_symbol(symbol)?;
+                                            debug!("Symbol import address ptr: 0x{:X}", {
                                                 import_address_ptr
-                                            }
-                                        };
-
-                                        debug!("Absolute address: {:#x}, relocation overwrite address: {:#x}", absolute_address, relocation_overwrite_address);
-
-                                        // Write the absolute address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u64,
-                                                absolute_address as u64,
-                                            );
+                                            });
+                                        }
+                                        std::cmp::Ordering::Greater => {
+                                            // Do nothing
                                         }
                                     }
-                                    // The 32-bit VA of the relocation target.
-                                    IMAGE_REL_AMD64_ADDR32 => {
-                                        // The absolute address is the target section base + the relocation overwrite address + the symbol value
-                                        let absolute_address = {
-                                            if import_address_ptr == 0 {
-                                                target_section_base
-                                                    + unsafe {
-                                                        core::ptr::read_unaligned(
-                                                            relocation_overwrite_address
-                                                                as *const u32,
-                                                        )
-                                                            as usize
+
+                                    // Get the target section base that is the section mapping with the symbol section number - 1
+                                    let target_section_base = {
+                                        if import_address_ptr == 0 {
+                                            unsafe {
+                                                SECTION_MAPPING
+                                                    [(symbol.section_number as usize) - 1]
+                                            }
+                                        } else {
+                                            0
+                                        }
+                                    };
+
+                                    debug!("Relocation type: {:#?}", relocation.typ);
+
+                                    // Calculate the relocation overwrite address
+                                    let relocation_overwrite_address =
+                                        (unsafe { SECTION_MAPPING[index] })
+                                            + (relocation.virtual_address as usize)
+                                            - section.virtual_address as usize;
+
+                                    // Handle the relocations based on the architecture
+                                    if self.is_x64()? {
+                                        match relocation.typ {
+                                            // The 64-bit VA of the relocation target.
+                                            IMAGE_REL_AMD64_ADDR64 => {
+                                                // The absolute address is the target section base + the relocation overwrite address + the symbol value
+                                                let absolute_address = {
+                                                    if import_address_ptr == 0 {
+                                                        target_section_base
+                                                            + unsafe {
+                                                                core::ptr::read_unaligned(
+                                                                    relocation_overwrite_address
+                                                                        as *const u32,
+                                                                )
+                                                                    as usize
+                                                            }
+                                                            + symbol.value as usize
+                                                    } else {
+                                                        import_address_ptr
                                                     }
-                                                    + symbol.value as usize
-                                            } else {
-                                                import_address_ptr
+                                                };
+
+                                                debug!("Absolute address: {:#x}, relocation overwrite address: {:#x}", absolute_address, relocation_overwrite_address);
+
+                                                // Write the absolute address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u64,
+                                                        absolute_address as u64,
+                                                    );
+                                                }
                                             }
-                                        };
+                                            // The 32-bit VA of the relocation target.
+                                            IMAGE_REL_AMD64_ADDR32 => {
+                                                // The absolute address is the target section base + the relocation overwrite address + the symbol value
+                                                let absolute_address = {
+                                                    if import_address_ptr == 0 {
+                                                        target_section_base
+                                                            + unsafe {
+                                                                core::ptr::read_unaligned(
+                                                                    relocation_overwrite_address
+                                                                        as *const u32,
+                                                                )
+                                                                    as usize
+                                                            }
+                                                            + symbol.value as usize
+                                                    } else {
+                                                        import_address_ptr
+                                                    }
+                                                };
 
-                                        debug!(
-                                            "Absolute address 2: {:#x}, overwrite address: {:#x}",
-                                            absolute_address, relocation_overwrite_address
-                                        );
-
-                                        // Write the absolute address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u32,
-                                                absolute_address as u32,
-                                            );
-                                        }
-                                    }
-                                    // IMAGE_REL_AMD64_ADDR32NB
-                                    IMAGE_REL_AMD64_ADDR32NB => {
-                                        let offset = unsafe {
-                                            core::ptr::read_unaligned(
-                                                relocation_overwrite_address as *const u32,
-                                            )
-                                        };
-
-                                        let rva_address = {
-                                            if import_address_ptr == 0 {
-                                                ((target_section_base as isize) + offset as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
-                                            } else {
-                                                (import_address_ptr as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
-                                            }
-                                        };
-
-                                        debug!(
-                                            "RVA address: {:#x}, overwrite address: {:#x}",
-                                            rva_address, relocation_overwrite_address
-                                        );
-
-                                        // Write the relative virtual address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u32,
-                                                rva_address as u32,
-                                            );
-                                        }
-                                    }
-                                    // The 32-bit relative address from the byte following the relocation.
-                                    IMAGE_REL_AMD64_REL32 => {
-                                        let offset = unsafe {
-                                            core::ptr::read_unaligned(
-                                                relocation_overwrite_address as *const u32,
-                                            )
-                                        }
-                                            as usize;
-
-                                        let relative_address = {
-                                            if import_address_ptr == 0 {
                                                 debug!(
-                                                    "Relative absolute base address: {:#x}",
-                                                    ((target_section_base as isize)
-                                                        + (offset as isize)
-                                                        + symbol.value as usize as isize)
+                                                        "Absolute address 2: {:#x}, overwrite address: {:#x}",
+                                                        absolute_address, relocation_overwrite_address
+                                                    );
+
+                                                // Write the absolute address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u32,
+                                                        absolute_address as u32,
+                                                    );
+                                                }
+                                            }
+                                            // IMAGE_REL_AMD64_ADDR32NB
+                                            IMAGE_REL_AMD64_ADDR32NB => {
+                                                let offset = unsafe {
+                                                    core::ptr::read_unaligned(
+                                                        relocation_overwrite_address as *const u32,
+                                                    )
+                                                };
+
+                                                let rva_address = {
+                                                    if import_address_ptr == 0 {
+                                                        ((target_section_base as isize)
+                                                            + offset as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    } else {
+                                                        (import_address_ptr as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    }
+                                                };
+
+                                                debug!(
+                                                    "RVA address: {:#x}, overwrite address: {:#x}",
+                                                    rva_address, relocation_overwrite_address
                                                 );
 
-                                                ((target_section_base as isize)
-                                                    + (offset as isize)
-                                                    + symbol.value as usize as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
-                                            } else {
-                                                (import_address_ptr as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
+                                                // Write the relative virtual address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u32,
+                                                        rva_address as u32,
+                                                    );
+                                                }
                                             }
-                                        };
+                                            // The 32-bit relative address from the byte following the relocation.
+                                            IMAGE_REL_AMD64_REL32 => {
+                                                let offset = unsafe {
+                                                    core::ptr::read_unaligned(
+                                                        relocation_overwrite_address as *const u32,
+                                                    )
+                                                }
+                                                    as usize;
 
-                                        if import_address_ptr != 0 {
-                                            debug!(
-                                                "Import address: {:#x}, overwrite address: {:#x}",
-                                                import_address_ptr, relocation_overwrite_address
-                                            );
+                                                let relative_address = {
+                                                    if import_address_ptr == 0 {
+                                                        debug!(
+                                                            "Relative absolute base address: {:#x}",
+                                                            ((target_section_base as isize)
+                                                                + (offset as isize)
+                                                                + symbol.value as usize as isize)
+                                                        );
+
+                                                        ((target_section_base as isize)
+                                                            + (offset as isize)
+                                                            + symbol.value as usize as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    } else {
+                                                        (import_address_ptr as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    }
+                                                };
+
+                                                if import_address_ptr != 0 {
+                                                    debug!(
+                                                            "Import address: {:#x}, overwrite address: {:#x}",
+                                                            import_address_ptr, relocation_overwrite_address
+                                                        );
+                                                }
+
+                                                debug!(
+                                                        "Relative address: {:#x}, overwrite address: {:#x}",
+                                                        relative_address, relocation_overwrite_address
+                                                    );
+
+                                                // Write the relative address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u32,
+                                                        relative_address as u32,
+                                                    );
+                                                }
+                                            }
+                                            _ => {
+                                                panic!(
+                                                    "Unsupported relocation type: {:#?}",
+                                                    relocation.typ
+                                                );
+                                            }
                                         }
+                                    } else if self.is_x86()? {
+                                        match relocation.typ {
+                                            // The target's 32-bit VA.
+                                            IMAGE_REL_I386_DIR32 => {
+                                                let absolute_address = {
+                                                    if import_address_ptr == 0 {
+                                                        target_section_base
+                                                            + unsafe {
+                                                                core::ptr::read_unaligned(
+                                                                    relocation_overwrite_address
+                                                                        as *const u32,
+                                                                )
+                                                                    as usize
+                                                            }
+                                                            + symbol.value as usize
+                                                    } else {
+                                                        import_address_ptr
+                                                    }
+                                                };
 
-                                        debug!(
-                                            "Relative address: {:#x}, overwrite address: {:#x}",
-                                            relative_address, relocation_overwrite_address
-                                        );
+                                                debug!(
+                                                        "Absolute address: {:#x}, overwrite address: {:#x}",
+                                                        absolute_address, relocation_overwrite_address
+                                                    );
 
-                                        // Write the relative address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u32,
-                                                relative_address as u32,
-                                            );
+                                                // Write the absolute address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u32,
+                                                        absolute_address as u32,
+                                                    );
+                                                }
+                                            }
+                                            // The 32-bit relative displacement to the target. This supports the x86 relative branch and call instructions.
+                                            IMAGE_REL_I386_REL32 => {
+                                                let offset = unsafe {
+                                                    core::ptr::read_unaligned(
+                                                        relocation_overwrite_address as *const u32,
+                                                    )
+                                                }
+                                                    as usize;
+
+                                                let relative_address = {
+                                                    if import_address_ptr == 0 {
+                                                        debug!(
+                                                            "Relative absolute base address: {:#x}",
+                                                            ((target_section_base as isize)
+                                                                + (offset as isize)
+                                                                + symbol.value as usize as isize)
+                                                        );
+
+                                                        ((target_section_base as isize)
+                                                            + (offset as isize)
+                                                            + symbol.value as usize as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    } else {
+                                                        (import_address_ptr as isize)
+                                                            .checked_sub(
+                                                                (relocation_overwrite_address
+                                                                    as isize)
+                                                                    + 4,
+                                                            )
+                                                            .unwrap()
+                                                    }
+                                                };
+
+                                                if import_address_ptr != 0 {
+                                                    debug!(
+                                                            "Import address: {:#x}, overwrite address: {:#x}",
+                                                            import_address_ptr, relocation_overwrite_address
+                                                        );
+                                                }
+
+                                                debug!(
+                                                        "Relative address: {:#x}, overwrite address: {:#x}",
+                                                        relative_address, relocation_overwrite_address
+                                                    );
+
+                                                // Write the relative address to the relocation overwrite address
+                                                unsafe {
+                                                    core::ptr::write_unaligned(
+                                                        relocation_overwrite_address as *mut u32,
+                                                        relative_address as u32,
+                                                    );
+                                                }
+                                            }
+                                            _ => {
+                                                panic!(
+                                                    "Unsupported relocation type: {:#?}",
+                                                    relocation.typ
+                                                );
+                                            }
                                         }
-                                    }
-                                    _ => {
-                                        panic!(
-                                            "Unsupported relocation type: {:#?}",
-                                            relocation.typ
-                                        );
                                     }
                                 }
-                            } else if self.is_x86()? {
-                                match relocation.typ {
-                                    // The target's 32-bit VA.
-                                    IMAGE_REL_I386_DIR32 => {
-                                        let absolute_address = {
-                                            if import_address_ptr == 0 {
-                                                target_section_base
-                                                    + unsafe {
-                                                        core::ptr::read_unaligned(
-                                                            relocation_overwrite_address
-                                                                as *const u32,
-                                                        )
-                                                            as usize
-                                                    }
-                                                    + symbol.value as usize
-                                            } else {
-                                                import_address_ptr
-                                            }
-                                        };
-
-                                        debug!(
-                                            "Absolute address: {:#x}, overwrite address: {:#x}",
-                                            absolute_address, relocation_overwrite_address
-                                        );
-
-                                        // Write the absolute address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u32,
-                                                absolute_address as u32,
-                                            );
-                                        }
-                                    }
-                                    // The 32-bit relative displacement to the target. This supports the x86 relative branch and call instructions.
-                                    IMAGE_REL_I386_REL32 => {
-                                        let offset = unsafe {
-                                            core::ptr::read_unaligned(
-                                                relocation_overwrite_address as *const u32,
-                                            )
-                                        }
-                                            as usize;
-
-                                        let relative_address = {
-                                            if import_address_ptr == 0 {
-                                                debug!(
-                                                    "Relative absolute base address: {:#x}",
-                                                    ((target_section_base as isize)
-                                                        + (offset as isize)
-                                                        + symbol.value as usize as isize)
-                                                );
-
-                                                ((target_section_base as isize)
-                                                    + (offset as isize)
-                                                    + symbol.value as usize as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
-                                            } else {
-                                                (import_address_ptr as isize)
-                                                    .checked_sub(
-                                                        (relocation_overwrite_address as isize) + 4,
-                                                    )
-                                                    .unwrap()
-                                            }
-                                        };
-
-                                        if import_address_ptr != 0 {
-                                            debug!(
-                                                "Import address: {:#x}, overwrite address: {:#x}",
-                                                import_address_ptr, relocation_overwrite_address
-                                            );
-                                        }
-
-                                        debug!(
-                                            "Relative address: {:#x}, overwrite address: {:#x}",
-                                            relative_address, relocation_overwrite_address
-                                        );
-
-                                        // Write the relative address to the relocation overwrite address
-                                        unsafe {
-                                            core::ptr::write_unaligned(
-                                                relocation_overwrite_address as *mut u32,
-                                                relative_address as u32,
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        panic!(
-                                            "Unsupported relocation type: {:#?}",
-                                            relocation.typ
-                                        );
-                                    }
+                                None => {
+                                    warn!("Symbol in relocation is None");
                                 }
                             }
                         }
                         None => {
-                            warn!("Symbol in relocation is None");
+                            warn!("Symbols are None");
                         }
                     }
                 }
@@ -735,7 +762,7 @@ impl<'a> Coffee<'a> {
         }
 
         // Iterate each symbol to find the entrypoint
-        for (_i, name, symbol) in self.coff.symbols.iter() {
+        for (_i, name, symbol) in self.coff.symbols.as_ref().unwrap().iter() {
             if name.is_none() {
                 continue;
             }
@@ -792,7 +819,7 @@ impl<'a> Coffee<'a> {
             }
 
             unsafe {
-                VirtualFree(section_base as *mut c_void, 0, MEM_RELEASE);
+                let _ = VirtualFree(section_base as *mut c_void, 0, MEM_RELEASE);
             }
         }
     }
