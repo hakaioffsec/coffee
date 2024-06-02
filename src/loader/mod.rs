@@ -125,7 +125,7 @@ impl<'a> Coffee<'a> {
         self.allocate_bof_memory()?;
 
         // Execute the bof
-        self.execute_bof(arguments, argument_size, entrypoint_name);
+        self.execute_bof(arguments, argument_size, entrypoint_name)?;
 
         // Get the output and print it
         let output_data = beacon_get_output_data();
@@ -731,7 +731,7 @@ impl<'a> Coffee<'a> {
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
         entrypoint_name: &Option<String>,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Check if any of the data-processing functions are present on the mapped functions
         // If so, throw a warning about the arguments
         let mapped_function_names =
@@ -760,8 +760,8 @@ impl<'a> Coffee<'a> {
             .any(|x| data_functions.contains(&x.as_str()))
             && argument_size.unwrap_or(0) <= 4
         {
-            warn!(
-                "This BOF expects arguments, but none were provided. Please check the provided arguments."
+            return Err(
+                "This BOF expects arguments, but none were provided. Please check the provided arguments.".into()
             );
         }
 
@@ -802,6 +802,7 @@ impl<'a> Coffee<'a> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Iterates through each section and frees the memory allocated for each section using `VirtualFree`.
