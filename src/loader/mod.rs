@@ -44,8 +44,8 @@ struct MappedFunctions {
 /// `MappedFunctions` is a struct that contains a list of mapped functions and the length of the list.
 impl MappedFunctions {
     /// `new` returns a new `MappedFunctions` struct.
-    fn new() -> *mut Self {
-        std::ptr::from_mut(unsafe {
+    fn new() -> Result<*mut Self, Box<dyn std::error::Error>> {
+        Ok(std::ptr::from_mut(unsafe {
             let allocation = VirtualAlloc(
                 None,
                 core::mem::size_of::<MappedFunctions>(),
@@ -53,13 +53,14 @@ impl MappedFunctions {
                 PAGE_EXECUTE_READWRITE,
             );
 
+            if allocation.is_null() {
+                return Err("Failed to allocate function".into());
+            }
             debug!("Function allocated at: {:p}", allocation);
-
-            assert!(!allocation.is_null(), "Failed to allocate function");
 
             std::ptr::write_bytes(allocation, 0, core::mem::size_of::<MappedFunctions>());
             &mut *allocation.cast::<MappedFunctions>()
-        })
+        }))
     }
 
     /// `push` pushes a mapped function to the list.
@@ -69,8 +70,8 @@ impl MappedFunctions {
     }
 }
 
+/// `Drop` frees the memory allocated for the `MappedFunctions` struct.
 impl Drop for MappedFunctions {
-    /// drop frees the memory allocated for the `MappedFunctions` struct.
     fn drop(&mut self) {
         unsafe {
             let functions = std::ptr::from_mut(self).cast::<c_void>();
@@ -96,7 +97,7 @@ static mut SECTION_MAPPING: Vec<usize> = Vec::new();
 
 impl<'a> Coffee<'a> {
     /// Creates a new `CoffLoader` struct from a slice of bytes representing a COFF file.
-    pub fn new(coff_buffer: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(coff_buffer: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
         let coff = Coff::parse(coff_buffer)?;
 
         Ok(Self { coff_buffer, coff })
@@ -112,7 +113,7 @@ impl<'a> Coffee<'a> {
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
         entrypoint_name: &Option<String>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<String, Box<dyn std::error::Error>> {
         // Check if COFF is running on the current architecture
         if self.is_x86()? && cfg!(target_arch = "x86_64") {
             return Err("Cannot run x86 COFF on x86_64 architecture".into());
@@ -147,9 +148,7 @@ impl<'a> Coffee<'a> {
 
     /// This is a bit too repetitive
     /// Gets the __imp_(_) based on the architecture
-    fn get_imp_based_on_architecture(
-        &self,
-    ) -> Result<&str, Box<dyn std::error::Error + Send + Sync>> {
+    fn get_imp_based_on_architecture(&self) -> Result<&str, Box<dyn std::error::Error>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok("__imp__"),
             COFF_MACHINE_X86_64 => Ok("__imp_"),
@@ -158,7 +157,7 @@ impl<'a> Coffee<'a> {
     }
 
     /// Gets the 32-bit architecture based on the COFF machine type.
-    pub fn is_x86(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn is_x86(&self) -> Result<bool, Box<dyn std::error::Error>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok(true),
             COFF_MACHINE_X86_64 => Ok(false),
@@ -167,7 +166,7 @@ impl<'a> Coffee<'a> {
     }
 
     /// Gets the 64-bit architecture based on the COFF machine type.
-    pub fn is_x64(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn is_x64(&self) -> Result<bool, Box<dyn std::error::Error>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok(false),
             COFF_MACHINE_X86_64 => Ok(true),
@@ -181,17 +180,18 @@ impl<'a> Coffee<'a> {
     /// When the symbol name is an external function, it will return the procedure address of the function
     /// in the specified library after allocating using the mapping list.
     /// apisets can be shown in the symbol name.
-    fn get_import_from_symbol(
-        &self,
-        symbol: Symbol,
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    fn get_import_from_symbol(&self, symbol: Symbol) -> Result<usize, Box<dyn std::error::Error>> {
         // Get the global mapping list
         if unsafe { FUNCTION_MAPPING.is_none() } {
             unsafe {
-                FUNCTION_MAPPING = Some(&mut *MappedFunctions::new());
+                FUNCTION_MAPPING = Some(&mut *MappedFunctions::new()?);
             }
         }
-        let mapping_list = unsafe { FUNCTION_MAPPING.as_mut().unwrap() };
+        let mapping_list = unsafe {
+            FUNCTION_MAPPING
+                .as_mut()
+                .ok_or("Function mapping is empty")?
+        };
 
         // Resolve the symbol name
         let raw_symbol_name = match &self.coff.strings {
@@ -205,25 +205,20 @@ impl<'a> Coffee<'a> {
         let polished_import_name = raw_symbol_name
             .split(self.get_imp_based_on_architecture()?) // Some Object files will have __imp_ while on 32-bit for some reason!
             .last()
-            .unwrap()
+            .ok_or("Failed to resolve import")?
             .split('@')
-            .next();
-
-        assert!(
-            polished_import_name.is_some(),
-            "Failed to get polished import name"
-        );
+            .next()
+            .ok_or("Failed to get polished import name")?;
 
         let mut symbol_address = 0;
 
         // Check if `polished_symbol_name` is already in mapping_list as the 'name' property
         // If it is, we already resolved it, so we can return early
         for i in 0..mapping_list.len {
-            if mapping_list.list[i].name == polished_import_name.unwrap() {
+            if mapping_list.list[i].name == polished_import_name {
                 debug!(
                     "Symbol already mapped: {}: {:#x}",
-                    polished_import_name.unwrap(),
-                    mapping_list.list[i].address
+                    polished_import_name, mapping_list.list[i].address
                 );
                 let allocated_address = &mapping_list.list.as_ref()[i];
                 return Ok(std::ptr::from_ref(&allocated_address.address) as usize);
@@ -231,66 +226,61 @@ impl<'a> Coffee<'a> {
         }
 
         // Check if the symbol is external or internal
-        if polished_import_name.unwrap().contains('$') {
+        if let Some(index) = polished_import_name.find('$') {
             // This is an external symbol
-            // Split $ to get the library name and function name
-            let mut split_symbol_name = polished_import_name.unwrap().split('$');
-            let library_name_dll =
-                format!("{}.dll", split_symbol_name.next().unwrap().to_lowercase());
+            // Split on $ to get library and function names
+            let (library_name, function_name) = polished_import_name.split_at(index);
+            let function_name = &function_name[1..]; // Strip leading '$'
+            let library_name_dll = format!("{}.dll", library_name.to_lowercase());
 
             // If symbol name contains @, remove everything before the @
-            let function_name = split_symbol_name.next();
-            if function_name.is_some() {
-                let function_name = function_name.unwrap().split('@').next().unwrap();
+            let function_name = function_name.split('@').next().unwrap_or(function_name);
 
-                info!(
-                    "Resolving external import: {}!{}",
-                    library_name_dll, function_name
-                );
+            info!(
+                "Resolving external import: {}!{}",
+                library_name_dll, function_name
+            );
 
-                // Get the function address
-                let load_library_address = unsafe {
-                    LoadLibraryW(PCWSTR(
-                        WideCString::from_str(format!("{library_name_dll}\0"))?.as_ptr(),
-                    ))?
-                };
+            // Get the function address
+            let load_library_address = unsafe {
+                LoadLibraryW(PCWSTR(
+                    WideCString::from_str(format!("{library_name_dll}\0"))?.as_ptr(),
+                ))?
+            };
 
-                // Get the function address
-                let procedure_address = unsafe {
-                    GetProcAddress(
-                        load_library_address,
-                        PCSTR(format!("{function_name}\0").as_ptr()), // Null terminated string lol :D
+            // Get the function address
+            let procedure_address = match unsafe {
+                GetProcAddress(
+                    load_library_address,
+                    PCSTR(format!("{function_name}\0").as_ptr()),
+                )
+            } {
+                Some(address) => address,
+                None => {
+                    return Err(
+                        format!("Failed to get procedure address: {polished_import_name}").into(),
                     )
-                };
+                }
+            } as usize;
 
-                assert!(
-                    procedure_address.is_some(),
-                    "Failed to get procedure address: {}",
-                    polished_import_name.unwrap()
-                );
-
-                symbol_address = procedure_address.unwrap() as usize;
-            }
+            symbol_address = procedure_address;
         } else {
             // This is an internal symbol
-            if INTERNAL_FUNCTION_NAMES.contains(&polished_import_name.unwrap()) {
-                info!(
-                    "Resolving internal import: {}",
-                    polished_import_name.unwrap()
-                );
-                let internal_func_address = get_function_ptr(polished_import_name.unwrap());
+            if INTERNAL_FUNCTION_NAMES.contains(&polished_import_name) {
+                info!("Resolving internal import: {}", polished_import_name);
+                let internal_func_address = get_function_ptr(polished_import_name);
 
                 symbol_address = internal_func_address;
             } else {
-                warn!("Unknown internal symbol: {}", polished_import_name.unwrap());
+                warn!("Unknown internal symbol: {}", polished_import_name);
             }
         }
 
         // Push the mapped function to the global list
         let mapped_func_entry = MappedFunction {
             address: symbol_address,
-            name: polished_import_name.unwrap().to_string(),
-            function_name: polished_import_name.unwrap().to_string(),
+            name: polished_import_name.to_string(),
+            function_name: polished_import_name.to_string(),
         };
         mapping_list.push(mapped_func_entry);
 
@@ -301,13 +291,12 @@ impl<'a> Coffee<'a> {
 
     /// Allocates all the memory needed for each relocation and section.
     #[allow(clippy::cast_possible_wrap)]
-    fn allocate_bof_memory(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn allocate_bof_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
         // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
         // Note that the Windows loader limits the number of sections to 96.
-        assert!(
-            self.coff.header.number_of_sections <= 96,
-            "Number of sections is greater than 96!"
-        );
+        if self.coff.header.number_of_sections > 96 {
+            return Err("Number of sections is greater than 96!".into());
+        }
 
         // Iterate through coff_header NumberOfSections
         info!(
@@ -519,7 +508,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate RVA address",
+                                                            )?
                                                     } else {
                                                         (import_address_ptr as isize)
                                                             .checked_sub(
@@ -527,7 +518,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate RVA address",
+                                                            )?
                                                     }
                                                 };
 
@@ -570,7 +563,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate relative address",
+                                                            )?
                                                     } else {
                                                         (import_address_ptr as isize)
                                                             .checked_sub(
@@ -578,7 +573,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate relative address",
+                                                            )?
                                                     }
                                                 };
 
@@ -668,7 +665,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate relative address",
+                                                            )?
                                                     } else {
                                                         (import_address_ptr as isize)
                                                             .checked_sub(
@@ -676,7 +675,9 @@ impl<'a> Coffee<'a> {
                                                                     as isize)
                                                                     + 4,
                                                             )
-                                                            .unwrap()
+                                                            .ok_or(
+                                                                "Failed to calculate relative address",
+                                                            )?
                                                     }
                                                 };
 
@@ -733,16 +734,17 @@ impl<'a> Coffee<'a> {
     ) {
         // Check if any of the data-processing functions are present on the mapped functions
         // If so, throw a warning about the arguments
-        let mapped_function_names = unsafe {
-            FUNCTION_MAPPING
-                .as_mut()
-                .unwrap()
-                .list
-                .iter()
-                .filter(|x| !x.name.is_empty())
-                .map(|x| x.function_name.clone())
-                .collect::<Vec<String>>()
-        };
+        let mapped_function_names =
+            if let Some(function_mapping) = unsafe { FUNCTION_MAPPING.as_mut() } {
+                function_mapping
+                    .list
+                    .iter()
+                    .filter(|x| !x.name.is_empty())
+                    .map(|x| x.function_name.clone())
+                    .collect::<Vec<String>>()
+            } else {
+                Vec::new()
+            };
 
         let data_functions = [
             "BeaconDataParse",
@@ -764,43 +766,40 @@ impl<'a> Coffee<'a> {
         }
 
         // Iterate each symbol to find the entrypoint
-        for (_i, name, symbol) in self.coff.symbols.as_ref().unwrap().iter() {
-            if name.is_none() {
-                continue;
-            }
+        if let Some(symbols) = self.coff.symbols.as_ref() {
+            for (_i, name, symbol) in symbols.iter() {
+                if let Some(name) = name {
+                    debug!(
+                        "Passing through symbol: {} section: {} value: {} storage class: {:#?}",
+                        name, symbol.section_number, symbol.value, symbol.storage_class
+                    );
 
-            debug!(
-                "Passing through symbol: {} section: {} value: {} storage class: {:#?}",
-                name.unwrap_or_default(),
-                symbol.section_number,
-                symbol.value,
-                symbol.storage_class
-            );
+                    let entry_name: String = if let Some(entrypoint_name) = entrypoint_name {
+                        entrypoint_name.to_string()
+                    } else {
+                        "Go".to_string()
+                        /* _go for 32-bit for whatever reason? */
+                    };
 
-            let entry_name: String = if entrypoint_name.is_some() {
-                entrypoint_name.as_ref().unwrap().to_string()
-            } else {
-                "Go".to_string()
-                /* _go for 32-bit for whatever reason? */
-            };
+                    if name.contains(entry_name.as_str()) {
+                        let entry_addr = unsafe { SECTION_MAPPING[(TEXT_SECTION_INDEX) as usize] }
+                            .add(symbol.value as usize);
 
-            if name.unwrap().contains(entry_name.as_str()) {
-                let entry_addr = unsafe { SECTION_MAPPING[(TEXT_SECTION_INDEX) as usize] }
-                    .add(symbol.value as usize);
+                        // Cast the entrypoint to a function
+                        info!("Calling entrypoint: {}:{:#x}", name, entry_addr);
+                        let entrypoint: extern "C" fn(*const u8, usize) =
+                            unsafe { std::mem::transmute(entry_addr) };
 
-                // Cast the entrypoint to a function
-                info!("Calling entrypoint: {}:{:#x}", name.unwrap(), entry_addr);
-                let entrypoint: extern "C" fn(*const u8, usize) =
-                    unsafe { std::mem::transmute(entry_addr) };
+                        // Call the entrypoint
+                        entrypoint(
+                            arguments.unwrap_or(std::ptr::null()),
+                            argument_size.unwrap_or(0),
+                        );
 
-                // Call the entrypoint
-                entrypoint(
-                    arguments.unwrap_or(std::ptr::null()),
-                    argument_size.unwrap_or(0),
-                );
-
-                // Break after executing so we don't run .pdata or any other section with relocations
-                break;
+                        // Break after executing so we don't run .pdata or any other section with relocations
+                        break;
+                    }
+                }
             }
         }
     }
@@ -808,7 +807,6 @@ impl<'a> Coffee<'a> {
     /// Iterates through each section and frees the memory allocated for each section using `VirtualFree`.
     /// This is done to prevent memory leaks.
     fn free_bof_memory(&self) {
-        // Drop mapped functions
         unsafe {
             FUNCTION_MAPPING = None;
         }

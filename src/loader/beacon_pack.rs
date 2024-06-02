@@ -1,6 +1,7 @@
 // BeaconPack rust port from https://github.com/trustedsec/COFFLoader/blob/main/beacon_generate.py
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::Write;
+use std::result::Result;
 
 pub struct BeaconPack {
     pub buffer: Vec<u8>,
@@ -19,74 +20,57 @@ impl BeaconPack {
     }
 
     /// `get_buffer` returns the buffer with the size prepended
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as an u32
-    pub fn get_buffer(&self) -> Vec<u8> {
+    pub fn get_buffer(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut result = vec![];
-        result.write_u32::<LittleEndian>(self.size).unwrap();
+        result.write_u32::<LittleEndian>(self.size)?;
         result.extend(&self.buffer);
-        result
+        Ok(result)
     }
 
     /// `add_short` adds a short to the buffer
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as a i16
-    pub fn add_short(&mut self, short: i16) {
-        self.buffer.write_i16::<LittleEndian>(short).unwrap();
+    pub fn add_short(&mut self, short: i16) -> Result<(), Box<dyn std::error::Error>> {
+        self.buffer.write_i16::<LittleEndian>(short)?;
         self.size += 2;
+        Ok(())
     }
 
     /// `add_int` adds an int to the buffer
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as a i32
-    pub fn add_int(&mut self, int: i32) {
-        self.buffer.write_i32::<LittleEndian>(int).unwrap();
+    pub fn add_int(&mut self, int: i32) -> Result<(), Box<dyn std::error::Error>> {
+        self.buffer.write_i32::<LittleEndian>(int)?;
         self.size += 4;
+        Ok(())
     }
 
     /// `add_str` adds a string to the buffer
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as a string
-    pub fn add_str(&mut self, str: &str) {
+    pub fn add_str(&mut self, str: &str) -> Result<(), Box<dyn std::error::Error>> {
         let s_bytes = str.as_bytes();
         self.buffer
-            .write_u32::<LittleEndian>((s_bytes.len() + 1) as u32)
-            .unwrap();
-        self.buffer.write_all(s_bytes).unwrap();
-        self.buffer.write_u8(0).unwrap();
+            .write_u32::<LittleEndian>((s_bytes.len() + 1) as u32)?;
+        self.buffer.write_all(s_bytes)?;
+        self.buffer.write_u8(0)?;
         self.size += (s_bytes.len() + 1) as u32 + 4;
+        Ok(())
     }
 
     /// `add_wstr` adds a wide string to the buffer
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as a wide string
-    pub fn add_wstr(&mut self, wstr: &str) {
+    pub fn add_wstr(&mut self, wstr: &str) -> Result<(), Box<dyn std::error::Error>> {
         let s_bytes = wstr.encode_utf16().collect::<Vec<u16>>();
         self.buffer
-            .write_u32::<LittleEndian>(((s_bytes.len() * 2) + 2) as u32)
-            .unwrap();
+            .write_u32::<LittleEndian>(((s_bytes.len() * 2) + 2) as u32)?;
         for c in &s_bytes {
-            self.buffer.write_u16::<LittleEndian>(*c).unwrap();
+            self.buffer.write_u16::<LittleEndian>(*c)?;
         }
-        self.buffer.write_u16::<LittleEndian>(0).unwrap();
+        self.buffer.write_u16::<LittleEndian>(0)?;
         self.size += ((s_bytes.len() * 2) + 2) as u32 + 4;
+        Ok(())
     }
 
     /// `add_bin` adds binary data to the buffer
-    ///
-    /// # Panics
-    /// Panics if the buffer cannot be written as binary data
-    pub fn add_bin(&mut self, bin: &[u8]) {
-        self.buffer
-            .write_u32::<LittleEndian>(bin.len() as u32)
-            .unwrap();
-        self.buffer.write_all(bin).unwrap();
+    pub fn add_bin(&mut self, bin: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        self.buffer.write_u32::<LittleEndian>(bin.len() as u32)?;
+        self.buffer.write_all(bin)?;
         self.size += (bin.len() as u32) + 4;
+        Ok(())
     }
 }
 
