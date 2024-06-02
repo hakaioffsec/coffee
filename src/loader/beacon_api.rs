@@ -91,54 +91,49 @@ pub static INTERNAL_FUNCTION_NAMES: [&str; 29] = [
 ];
 
 /// Match the function name to the internal function pointer.
-///
-/// # Panics
-/// Will panic if the given function name is not found in the internal function list.
-pub fn get_function_ptr(name: &str) -> usize {
+pub fn get_function_ptr(name: &str) -> Result<usize, Box<dyn std::error::Error>> {
     match name {
         // Data
-        "BeaconDataParse" => beacon_data_parse as usize,
-        "BeaconDataPtr" => beacon_data_ptr as usize,
-        "BeaconDataInt" => beacon_data_int as usize,
-        "BeaconDataShort" => beacon_data_short as usize,
-        "BeaconDataLength" => beacon_data_length as usize,
-        "BeaconDataExtract" => beacon_data_extract as usize,
+        "BeaconDataParse" => Ok(beacon_data_parse as usize),
+        "BeaconDataPtr" => Ok(beacon_data_ptr as usize),
+        "BeaconDataInt" => Ok(beacon_data_int as usize),
+        "BeaconDataShort" => Ok(beacon_data_short as usize),
+        "BeaconDataLength" => Ok(beacon_data_length as usize),
+        "BeaconDataExtract" => Ok(beacon_data_extract as usize),
 
         // Format
-        "BeaconFormatAlloc" => beacon_format_alloc as usize,
-        "BeaconFormatReset" => beacon_format_reset as usize,
-        "BeaconFormatAppend" => beacon_format_append as usize,
-        "BeaconFormatPrintf" => beacon_format_printf as usize,
-        "BeaconFormatToString" => beacon_format_to_string as usize,
-        "BeaconFormatFree" => beacon_format_free as usize,
-        "BeaconFormatInt" => beacon_format_int as usize,
+        "BeaconFormatAlloc" => Ok(beacon_format_alloc as usize),
+        "BeaconFormatReset" => Ok(beacon_format_reset as usize),
+        "BeaconFormatAppend" => Ok(beacon_format_append as usize),
+        "BeaconFormatPrintf" => Ok(beacon_format_printf as usize),
+        "BeaconFormatToString" => Ok(beacon_format_to_string as usize),
+        "BeaconFormatFree" => Ok(beacon_format_free as usize),
+        "BeaconFormatInt" => Ok(beacon_format_int as usize),
 
         // Output
-        "BeaconOutput" => beacon_output as usize,
-        "BeaconPrintf" => beacon_printf as usize,
+        "BeaconOutput" => Ok(beacon_output as usize),
+        "BeaconPrintf" => Ok(beacon_printf as usize),
 
         // Token
-        "BeaconUseToken" => beacon_use_token as usize,
-        "BeaconRevertToken" => beacon_revert_token as usize,
-        "BeaconIsAdmin" => beacon_is_admin as usize,
+        "BeaconUseToken" => Ok(beacon_use_token as usize),
+        "BeaconRevertToken" => Ok(beacon_revert_token as usize),
+        "BeaconIsAdmin" => Ok(beacon_is_admin as usize),
 
         // Spawn / Inject functions
-        "BeaconGetSpawnTo" => beacon_get_spawn_to as usize,
-        "BeaconInjectProcess" => beacon_inject_process as usize,
-        "BeaconInjectTemporaryProcess" => beacon_inject_temporary_process as usize,
-        "BeaconSpawnTemporaryProcess" => beacon_spawn_temporary_process as usize,
-        "BeaconCleanupProcess" => beacon_cleanup_process as usize,
+        "BeaconGetSpawnTo" => Ok(beacon_get_spawn_to as usize),
+        "BeaconInjectProcess" => Ok(beacon_inject_process as usize),
+        "BeaconInjectTemporaryProcess" => Ok(beacon_inject_temporary_process as usize),
+        "BeaconSpawnTemporaryProcess" => Ok(beacon_spawn_temporary_process as usize),
+        "BeaconCleanupProcess" => Ok(beacon_cleanup_process as usize),
 
         // Utility functions
-        "toWideChar" => to_wide_char as usize,
-        "LoadLibraryA" => LoadLibraryA as usize,
-        "GetProcAddress" => GetProcAddress as usize,
-        "FreeLibrary" => FreeLibrary as usize,
-        "GetModuleHandleA" => GetModuleHandleA as usize,
-        "__C_specific_handler" => 0,
-        _ => {
-            panic!("Unknown internal function: {name}");
-        }
+        "toWideChar" => Ok(to_wide_char as usize),
+        "LoadLibraryA" => Ok(LoadLibraryA as usize),
+        "GetProcAddress" => Ok(GetProcAddress as usize),
+        "FreeLibrary" => Ok(FreeLibrary as usize),
+        "GetModuleHandleA" => Ok(GetModuleHandleA as usize),
+        "__C_specific_handler" => Ok(0),
+        _ => Err(format!("Unknown internal function: {name}").into()),
     }
 }
 

@@ -270,7 +270,7 @@ impl<'a> Coffee<'a> {
                 info!("Resolving internal import: {}", polished_import_name);
                 let internal_func_address = get_function_ptr(polished_import_name);
 
-                symbol_address = internal_func_address;
+                symbol_address = internal_func_address?;
             } else {
                 warn!("Unknown internal symbol: {}", polished_import_name);
             }
@@ -600,10 +600,11 @@ impl<'a> Coffee<'a> {
                                                 }
                                             }
                                             _ => {
-                                                panic!(
+                                                return Err(format!(
                                                     "Unsupported relocation type: {:#?}",
                                                     relocation.typ
-                                                );
+                                                )
+                                                .into());
                                             }
                                         }
                                     } else if self.is_x86()? {
@@ -702,10 +703,11 @@ impl<'a> Coffee<'a> {
                                                 }
                                             }
                                             _ => {
-                                                panic!(
+                                                return Err(format!(
                                                     "Unsupported relocation type: {:#?}",
                                                     relocation.typ
-                                                );
+                                                )
+                                                .into());
                                             }
                                         }
                                     }
