@@ -1,6 +1,5 @@
 use std::{ffi::c_void, intrinsics, ops::Add};
 
-use color_eyre::{eyre, Result};
 use goblin::pe::{
     header::{COFF_MACHINE_X86, COFF_MACHINE_X86_64},
     relocation::{
@@ -10,6 +9,7 @@ use goblin::pe::{
     symbol::Symbol,
     Coff,
 };
+use std::result::Result;
 use tracing::{debug, info, warn};
 use widestring::WideCString;
 use windows::{
@@ -96,7 +96,7 @@ static mut SECTION_MAPPING: Vec<usize> = Vec::new();
 
 impl<'a> Coffee<'a> {
     /// Creates a new `CoffLoader` struct from a slice of bytes representing a COFF file.
-    pub fn new(coff_buffer: &'a [u8]) -> Result<Self> {
+    pub fn new(coff_buffer: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let coff = Coff::parse(coff_buffer)?;
 
         Ok(Self { coff_buffer, coff })
@@ -107,20 +107,17 @@ impl<'a> Coffee<'a> {
     /// The entrypoint name is optional and is used to specify a custom entrypoint name.
     /// The default entrypoint name is go.
     /// The output of the bof is printed to stdout.
-    ///
-    /// # Panics
-    /// Panics if the COFF is being run on the wrong architecture.
     pub fn execute(
         &self,
         arguments: Option<*const u8>,
         argument_size: Option<usize>,
         entrypoint_name: &Option<String>,
-    ) -> Result<String> {
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Check if COFF is running on the current architecture
         if self.is_x86()? && cfg!(target_arch = "x86_64") {
-            panic!("Cannot run x86 COFF on x86_64 architecture");
+            return Err("Cannot run x86 COFF on x86_64 architecture".into());
         } else if self.is_x64()? && cfg!(target_arch = "x86") {
-            panic!("Cannot run x64 COFF on i686 architecture");
+            return Err("Cannot run x64 COFF on i686 architecture".into());
         }
 
         // Allocate memory for the bof
@@ -150,29 +147,31 @@ impl<'a> Coffee<'a> {
 
     /// This is a bit too repetitive
     /// Gets the __imp_(_) based on the architecture
-    fn get_imp_based_on_architecture(&self) -> Result<&str> {
+    fn get_imp_based_on_architecture(
+        &self,
+    ) -> Result<&str, Box<dyn std::error::Error + Send + Sync>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok("__imp__"),
             COFF_MACHINE_X86_64 => Ok("__imp_"),
-            _ => Err(eyre::eyre!("Unsupported architecture")),
+            _ => Err("Unsupported architecture".into()),
         }
     }
 
     /// Gets the 32-bit architecture based on the COFF machine type.
-    pub fn is_x86(&self) -> Result<bool> {
+    pub fn is_x86(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok(true),
             COFF_MACHINE_X86_64 => Ok(false),
-            _ => Err(eyre::eyre!("Unsupported architecture")),
+            _ => Err("Unsupported architecture".into()),
         }
     }
 
     /// Gets the 64-bit architecture based on the COFF machine type.
-    pub fn is_x64(&self) -> Result<bool> {
+    pub fn is_x64(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         match self.coff.header.machine {
             COFF_MACHINE_X86 => Ok(false),
             COFF_MACHINE_X86_64 => Ok(true),
-            _ => Err(eyre::eyre!("Unsupported architecture")),
+            _ => Err("Unsupported architecture".into()),
         }
     }
 
@@ -182,7 +181,10 @@ impl<'a> Coffee<'a> {
     /// When the symbol name is an external function, it will return the procedure address of the function
     /// in the specified library after allocating using the mapping list.
     /// apisets can be shown in the symbol name.
-    fn get_import_from_symbol(&self, symbol: Symbol) -> Result<usize> {
+    fn get_import_from_symbol(
+        &self,
+        symbol: Symbol,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         // Get the global mapping list
         if unsafe { FUNCTION_MAPPING.is_none() } {
             unsafe {
@@ -299,7 +301,7 @@ impl<'a> Coffee<'a> {
 
     /// Allocates all the memory needed for each relocation and section.
     #[allow(clippy::cast_possible_wrap)]
-    fn allocate_bof_memory(&self) -> Result<()> {
+    fn allocate_bof_memory(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
         // Note that the Windows loader limits the number of sections to 96.
         assert!(
