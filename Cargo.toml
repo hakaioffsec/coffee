@@ -20,18 +20,18 @@ lto = true
 
 [dependencies]
 base64 = "0.22.1" # For base64 decoding binary arguments.
-byteorder = "1.4.3" # For endianess conversion.
-clap = { version = "4.3.5", features = ["derive"] } # For command line parsing.
-color-eyre = "0.6.2" # For error handling.
-goblin = { version = "0.8.2", features = [
+byteorder = "1.5.0" # For endianess conversion.
+clap = { version = "4.5.60", features = ["derive"] } # For command line parsing.
+color-eyre = "0.6.5" # For error handling.
+goblin = { version = "0.10.5", features = [
     "alloc",
 ] } # For parsing COFF files. object can be used too.
-tracing = "0.1.37" # For logging.                                    
-tracing-subscriber = "0.3.17" # For logging.
-widestring = "1.0.2" # For wide string support.
+tracing = "0.1.44" # For logging.                                    
+tracing-subscriber = "0.3.22" # For logging.
+widestring = "1.2.1" # For wide string support.
 
 # Windows APIs.
-windows = { version = "0.56.0", features = [
+windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
     "Win32_System_SystemServices",
@@ -42,7 +42,7 @@ windows = { version = "0.56.0", features = [
 ] }
 
 # Pure type definitions for Windows APIs.
-windows-sys = { version = "0.52.0", features = [
+windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
     "Win32_System_SystemServices",

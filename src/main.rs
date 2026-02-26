@@ -1,8 +1,6 @@
 #![allow(internal_features)]
 #![feature(c_variadic)]
 #![feature(core_intrinsics)]
-#![feature(ptr_from_ref)]
-
 use std::fmt::Write;
 use std::path::PathBuf;
 
@@ -41,7 +39,7 @@ struct Args {
 
 /// Unhexlify a string of hexadecimal characters to pass as arguments to the BOF
 fn unhexlify_args(value: &str) -> Result<Vec<u8>> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(Report::msg("Invalid argument hexadecimal string"));
     }
 

@@ -9,7 +9,7 @@ use std::{
 
 use tracing::warn;
 use windows::Win32::{
-    Foundation::{CloseHandle, BOOL, FALSE, HANDLE, TRUE},
+    Foundation::{CloseHandle, HANDLE},
     Security::{GetTokenInformation, RevertToSelf, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
     System::{
         Diagnostics::Debug::WriteProcessMemory,
@@ -26,7 +26,15 @@ use windows_sys::Win32::{
     System::LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA},
 };
 
-// For Windows, we'll use the C runtime directly
+#[allow(clippy::upper_case_acronyms)]
+type BOOL = i32;
+const TRUE: BOOL = 1;
+const FALSE: BOOL = 0;
+
+// For Windows, we'll use the C runtime directly.
+// On MSVC, _vsnprintf is inlined in UCRT and requires legacy_stdio_definitions.lib.
+// On GNU, it's already available in the standard C library.
+#[cfg_attr(target_env = "msvc", link(name = "legacy_stdio_definitions"))]
 extern "C" {
     fn _vsnprintf_s(
         buffer: *mut c_char,
@@ -112,44 +120,44 @@ pub static INTERNAL_FUNCTION_NAMES: [&str; 29] = [
 pub fn get_function_ptr(name: &str) -> Result<usize, Box<dyn std::error::Error>> {
     match name {
         // Data
-        "BeaconDataParse" => Ok(beacon_data_parse as usize),
-        "BeaconDataPtr" => Ok(beacon_data_ptr as usize),
-        "BeaconDataInt" => Ok(beacon_data_int as usize),
-        "BeaconDataShort" => Ok(beacon_data_short as usize),
-        "BeaconDataLength" => Ok(beacon_data_length as usize),
-        "BeaconDataExtract" => Ok(beacon_data_extract as usize),
+        "BeaconDataParse" => Ok(beacon_data_parse as *const () as usize),
+        "BeaconDataPtr" => Ok(beacon_data_ptr as *const () as usize),
+        "BeaconDataInt" => Ok(beacon_data_int as *const () as usize),
+        "BeaconDataShort" => Ok(beacon_data_short as *const () as usize),
+        "BeaconDataLength" => Ok(beacon_data_length as *const () as usize),
+        "BeaconDataExtract" => Ok(beacon_data_extract as *const () as usize),
 
         // Format
-        "BeaconFormatAlloc" => Ok(beacon_format_alloc as usize),
-        "BeaconFormatReset" => Ok(beacon_format_reset as usize),
-        "BeaconFormatAppend" => Ok(beacon_format_append as usize),
-        "BeaconFormatPrintf" => Ok(beacon_format_printf as usize),
-        "BeaconFormatToString" => Ok(beacon_format_to_string as usize),
-        "BeaconFormatFree" => Ok(beacon_format_free as usize),
-        "BeaconFormatInt" => Ok(beacon_format_int as usize),
+        "BeaconFormatAlloc" => Ok(beacon_format_alloc as *const () as usize),
+        "BeaconFormatReset" => Ok(beacon_format_reset as *const () as usize),
+        "BeaconFormatAppend" => Ok(beacon_format_append as *const () as usize),
+        "BeaconFormatPrintf" => Ok(beacon_format_printf as *const () as usize),
+        "BeaconFormatToString" => Ok(beacon_format_to_string as *const () as usize),
+        "BeaconFormatFree" => Ok(beacon_format_free as *const () as usize),
+        "BeaconFormatInt" => Ok(beacon_format_int as *const () as usize),
 
         // Output
-        "BeaconOutput" => Ok(beacon_output as usize),
-        "BeaconPrintf" => Ok(beacon_printf as usize),
+        "BeaconOutput" => Ok(beacon_output as *const () as usize),
+        "BeaconPrintf" => Ok(beacon_printf as *const () as usize),
 
         // Token
-        "BeaconUseToken" => Ok(beacon_use_token as usize),
-        "BeaconRevertToken" => Ok(beacon_revert_token as usize),
-        "BeaconIsAdmin" => Ok(beacon_is_admin as usize),
+        "BeaconUseToken" => Ok(beacon_use_token as *const () as usize),
+        "BeaconRevertToken" => Ok(beacon_revert_token as *const () as usize),
+        "BeaconIsAdmin" => Ok(beacon_is_admin as *const () as usize),
 
         // Spawn / Inject functions
-        "BeaconGetSpawnTo" => Ok(beacon_get_spawn_to as usize),
-        "BeaconInjectProcess" => Ok(beacon_inject_process as usize),
-        "BeaconInjectTemporaryProcess" => Ok(beacon_inject_temporary_process as usize),
-        "BeaconSpawnTemporaryProcess" => Ok(beacon_spawn_temporary_process as usize),
-        "BeaconCleanupProcess" => Ok(beacon_cleanup_process as usize),
+        "BeaconGetSpawnTo" => Ok(beacon_get_spawn_to as *const () as usize),
+        "BeaconInjectProcess" => Ok(beacon_inject_process as *const () as usize),
+        "BeaconInjectTemporaryProcess" => Ok(beacon_inject_temporary_process as *const () as usize),
+        "BeaconSpawnTemporaryProcess" => Ok(beacon_spawn_temporary_process as *const () as usize),
+        "BeaconCleanupProcess" => Ok(beacon_cleanup_process as *const () as usize),
 
         // Utility functions
-        "toWideChar" => Ok(to_wide_char as usize),
-        "LoadLibraryA" => Ok(LoadLibraryA as usize),
-        "GetProcAddress" => Ok(GetProcAddress as usize),
-        "FreeLibrary" => Ok(FreeLibrary as usize),
-        "GetModuleHandleA" => Ok(GetModuleHandleA as usize),
+        "toWideChar" => Ok(to_wide_char as *const () as usize),
+        "LoadLibraryA" => Ok(LoadLibraryA as *const () as usize),
+        "GetProcAddress" => Ok(GetProcAddress as *const () as usize),
+        "FreeLibrary" => Ok(FreeLibrary as *const () as usize),
+        "GetModuleHandleA" => Ok(GetModuleHandleA as *const () as usize),
         "__C_specific_handler" => Ok(0),
         _ => Err(format!("Unknown internal function: {name}").into()),
     }
@@ -191,17 +199,16 @@ impl Carrier {
     }
 
     pub fn flush(&mut self) -> String {
-        let mut result = String::new();
+        let bytes: Vec<u8> = self
+            .output
+            .iter()
+            .map(|c| {
+                let b = *c as u8;
+                if b == 0 { b'\n' } else { b }
+            })
+            .collect();
 
-        for c in &self.output {
-            if (*c as u8) == 0 {
-                result.push(0x0a as char);
-            } else {
-                result.push(*c as u8 as char);
-            }
-        }
-
-        result
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 
     #[allow(clippy::len_without_is_empty)]
@@ -450,7 +457,7 @@ extern "C" fn beacon_format_append(format: *mut Formatp, text: *const c_char, le
 
 /// Append a formatted string to this object.
 #[no_mangle]
-unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_char, mut args: ...) {
+unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_char, args: ...) {
     if format.is_null() {
         return;
     }
@@ -465,7 +472,7 @@ unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_ch
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1, // Leave space for null terminator
         fmt,
-        args.as_va_list(),
+        args,
     );
 
     // Check if the operation was successful
@@ -582,6 +589,7 @@ extern "C" fn beacon_format_int(format: *mut Formatp, value: c_int) {
 
 /// Send output to the Beacon operator.
 #[no_mangle]
+#[allow(static_mut_refs)]
 extern "C" fn beacon_output(_type: c_int, data: *mut c_char, len: c_int) {
     unsafe { OUTPUT.append_char_array(data, len) }
 }
@@ -595,7 +603,7 @@ pub extern "C" fn beacon_get_output_data() -> &'static mut Carrier {
 
 /// Format and present output to the Beacon operator.
 #[no_mangle]
-unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...) {
+unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, args: ...) {
     // Use a buffer large enough for most format operations
     let mut buffer = vec![0u8; 4096];
 
@@ -604,7 +612,7 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1,
         fmt,
-        args.as_va_list(),
+        args,
     );
 
     // Check if the operation was successful
@@ -618,6 +626,7 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...
     // Convert buffer to String, but only the written portion
     let formatted_str = String::from_utf8_lossy(&buffer[..bytes_written as usize]).into_owned();
 
+    #[allow(static_mut_refs)]
     OUTPUT.append_string(&formatted_str);
 }
 
@@ -628,7 +637,7 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...
 /// Returns TRUE if the token was successfully applied, FALSE otherwise.
 #[no_mangle]
 extern "C" fn beacon_use_token(token: HANDLE) -> BOOL {
-    match unsafe { SetThreadToken(Some(std::ptr::null()), token) } {
+    match unsafe { SetThreadToken(Some(std::ptr::null()), Some(token)) } {
         Ok(()) => TRUE,
         Err(_) => FALSE,
     }
@@ -650,7 +659,7 @@ extern "C" fn beacon_revert_token() {
 /// Returns TRUE if Beacon is in a high-integrity context.
 #[no_mangle]
 extern "C" fn beacon_is_admin() -> BOOL {
-    let mut token: HANDLE = HANDLE(0);
+    let mut token: HANDLE = HANDLE(std::ptr::null_mut());
     let token_elevated: TOKEN_ELEVATION = TOKEN_ELEVATION { TokenIsElevated: 0 };
 
     let open_token_result =
@@ -700,7 +709,7 @@ extern "C" fn beacon_inject_process(
 ) {
     unsafe {
         if let Ok(process_handle) =
-            OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_WRITE, None, pid as u32)
+            OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_WRITE, false, pid as u32)
         {
             if process_handle.is_invalid() {
                 return;
