@@ -472,7 +472,7 @@ unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_ch
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1, // Leave space for null terminator
         fmt,
-        args,
+        args.as_va_list(),
     );
 
     // Check if the operation was successful
@@ -612,7 +612,7 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, args: ...) {
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1,
         fmt,
-        args,
+        args.as_va_list(),
     );
 
     // Check if the operation was successful
