@@ -457,7 +457,7 @@ extern "C" fn beacon_format_append(format: *mut Formatp, text: *const c_char, le
 
 /// Append a formatted string to this object.
 #[no_mangle]
-unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_char, args: ...) {
+unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_char, mut args: ...) {
     if format.is_null() {
         return;
     }
@@ -472,7 +472,7 @@ unsafe extern "C" fn beacon_format_printf(format: *mut Formatp, fmt: *const c_ch
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1, // Leave space for null terminator
         fmt,
-        args,
+        args.as_va_list(),
     );
 
     // Check if the operation was successful
@@ -603,7 +603,7 @@ pub extern "C" fn beacon_get_output_data() -> &'static mut Carrier {
 
 /// Format and present output to the Beacon operator.
 #[no_mangle]
-unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, args: ...) {
+unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, mut args: ...) {
     // Use a buffer large enough for most format operations
     let mut buffer = vec![0u8; 4096];
 
@@ -612,7 +612,7 @@ unsafe extern "C" fn beacon_printf(_type: c_int, fmt: *mut c_char, args: ...) {
         buffer.as_mut_ptr() as *mut c_char,
         buffer.len() - 1,
         fmt,
-        args,
+        args.as_va_list(),
     );
 
     // Check if the operation was successful
