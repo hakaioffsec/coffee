@@ -293,11 +293,9 @@ impl<'a> Coffee<'a> {
     /// Allocates all the memory needed for each relocation and section.
     #[allow(clippy::cast_possible_wrap)]
     fn allocate_bof_memory(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
-        // Note that the Windows loader limits the number of sections to 96.
-        if self.coff.header.number_of_sections > 96 {
-            return Err("Number of sections is greater than 96!".into());
-        }
+        // Section-count guard disabled: 
+        // the 96-section limit applies to PE images loaded via the Windows image loader, 
+        // not to per-section VirtualAlloc BOF (like COFFLoader by trustedsec)
 
         // Iterate through coff_header NumberOfSections
         info!(
