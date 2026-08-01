@@ -785,7 +785,11 @@ impl<'a> Coffee<'a> {
                     };
 
                     if name.contains(entry_name.as_str()) {
-                        let entry_addr = unsafe { SECTION_MAPPING[(TEXT_SECTION_INDEX) as usize] }
+                        // Use the symbol's own section, not a global "last .text" index.
+                        // With MSVC-emitted COMDATs there are many .text$mn sections;
+                        // the entry symbol's section_number is 1-based.
+                        let entry_sec_idx = (symbol.section_number - 1) as usize;
+                        let entry_addr = unsafe { SECTION_MAPPING[entry_sec_idx] }
                             .add(symbol.value as usize);
 
                         // Cast the entrypoint to a function
