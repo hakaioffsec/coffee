@@ -1,5 +1,4 @@
 #![allow(internal_features)]
-#![feature(c_variadic)]
 #![feature(core_intrinsics)]
 use std::fmt::Write;
 use std::path::PathBuf;
